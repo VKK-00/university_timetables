@@ -1,0 +1,10 @@
+template_path: ../Шаблон.xlsx
+output_dir: ../out
+cache_dir: ../.cache/timetable_scraper
+confidence_threshold: 0.74
+ocr_enabled: true
+sources:
+  - name: knu-archive
+    kind: zip
+    path: ../Розклади КНУ Шевченка _ Univera-20260404T113654Z-3-001.zip
+

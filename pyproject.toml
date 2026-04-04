@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "timetable-scraper"
+version = "0.1.0"
+description = "Universal KNU-first timetable scraper with Excel, web, Google Sheets, and PDF/OCR support."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "beautifulsoup4>=4.12.3",
+  "lxml>=5.2.2",
+  "openpyxl>=3.1.5",
+  "pdfplumber>=0.11.4",
+  "pillow>=10.4.0",
+  "pypdfium2>=4.30.0",
+  "pytesseract>=0.3.13",
+  "pyyaml>=6.0.2",
+  "requests>=2.32.3",
+  "xlrd>=2.0.1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.3",
+  "reportlab>=4.2.2",
+]
+
+[project.scripts]
+timetable-scraper = "timetable_scraper.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
