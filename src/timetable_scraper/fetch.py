@@ -51,6 +51,7 @@ def _fetch_remote(url: str, session: requests.Session) -> requests.Response:
 def _fetch_google_resolved(url: str, session: requests.Session, fallback: requests.Response | None = None) -> requests.Response:
     parsed = urlparse(url)
     doc_id = _extract_google_id(url)
+    published_id = _extract_google_published_id(url)
     gid = parse_qs(parsed.query).get("gid", ["0"])[0]
     candidates: list[str] = []
     if doc_id and "spreadsheets" in parsed.path:
@@ -60,6 +61,14 @@ def _fetch_google_resolved(url: str, session: requests.Session, fallback: reques
                 f"https://docs.google.com/spreadsheets/d/{doc_id}/export?format=csv&gid={gid}",
                 f"https://docs.google.com/spreadsheets/d/{doc_id}/gviz/tq?tqx=out:html&gid={gid}",
                 f"https://docs.google.com/spreadsheets/d/{doc_id}/htmlview?gid={gid}",
+            ]
+        )
+    if published_id and "/d/e/" in parsed.path and "spreadsheets" in parsed.path:
+        candidates.extend(
+            [
+                f"https://docs.google.com/spreadsheets/d/e/{published_id}/pub?output=xlsx",
+                f"https://docs.google.com/spreadsheets/d/e/{published_id}/pub?output=csv&gid={gid}",
+                f"https://docs.google.com/spreadsheets/d/e/{published_id}/pubhtml?gid={gid}&single=true",
             ]
         )
     if doc_id and "file/d/" in parsed.path:
@@ -78,10 +87,19 @@ def _fetch_google_resolved(url: str, session: requests.Session, fallback: reques
 
 
 def _extract_google_id(url: str) -> str | None:
+    if re.search(r"/d/e/[A-Za-z0-9_-]+", url):
+        return None
     match = re.search(r"/d/([A-Za-z0-9_-]+)", url)
     if match:
         return match.group(1)
     match = re.search(r"[?&]id=([A-Za-z0-9_-]+)", url)
+    if match:
+        return match.group(1)
+    return None
+
+
+def _extract_google_published_id(url: str) -> str | None:
+    match = re.search(r"/d/e/([A-Za-z0-9_-]+)", url)
     if match:
         return match.group(1)
     return None

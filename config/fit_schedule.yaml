@@ -1,0 +1,12 @@
+template_path: ../Шаблон.xlsx
+output_dir: ../out_fit
+cache_dir: ../.cache/timetable_scraper_fit
+confidence_threshold: 0.74
+ocr_enabled: true
+sources:
+  - name: fit-schedule-semester-1
+    kind: google_sheet
+    url: https://docs.google.com/spreadsheets/d/1A0pNHgJde18io4jz4SJn2Q2poDxAVVMjG_4gLi4lXm8/edit?usp=sharing
+  - name: fit-schedule-semester-2
+    kind: google_sheet
+    url: https://docs.google.com/spreadsheets/d/e/2PACX-1vS4WZHYWuhCpVhFiOY-uCCDPZBu0RUG-tCW2j0ZeQkiFlyObt2FTY_XivI0KD7xPF7EYu55CfErsv6T/pubhtml
