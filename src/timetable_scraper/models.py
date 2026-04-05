@@ -31,11 +31,19 @@ class AppConfig:
 class DiscoveredAsset:
     source_name: str
     source_kind: str
-    source_url_or_path: str
     asset_kind: str
     locator: str
     display_name: str
+    source_root_url: str = ""
+    source_url_or_path: str = ""
+    origin_kind: str = "official_page"
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.source_root_url:
+            self.source_root_url = self.source_url_or_path or self.locator
+        if not self.source_url_or_path:
+            self.source_url_or_path = self.source_root_url
 
 
 @dataclass(slots=True)
@@ -102,12 +110,38 @@ class NormalizedRow:
     course: str = ""
     notes: str = ""
     sheet_name: str = ""
+    source_name: str = ""
     source_kind: str = ""
+    source_root_url: str = ""
+    asset_locator: str = ""
     source_url_or_path: str = ""
     confidence: float = 1.0
     warnings: list[str] = field(default_factory=list)
     raw_excerpt: str = ""
     content_hash: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.source_root_url:
+            self.source_root_url = self.source_url_or_path
+        if not self.source_url_or_path:
+            self.source_url_or_path = self.source_root_url
+        if not self.asset_locator:
+            self.asset_locator = self.source_root_url
+
+
+@dataclass(slots=True)
+class SourceRunSummary:
+    source_name: str
+    source_root_url: str
+    status: str
+    accepted_rows: int = 0
+    review_rows: int = 0
+    discovered_assets: int = 0
+    attempted_assets: int = 0
+    discovery_issues: list[str] = field(default_factory=list)
+    runtime_issues: list[str] = field(default_factory=list)
+    top_review_warnings: list[str] = field(default_factory=list)
+    note: str = ""
 
 
 @dataclass(slots=True)
@@ -117,3 +151,6 @@ class PipelineOutput:
     review_queue_path: Path
     rows: list[NormalizedRow]
     review_rows: list[NormalizedRow]
+    source_summary_path: Path | None = None
+    source_report_path: Path | None = None
+    source_summaries: list[SourceRunSummary] = field(default_factory=list)

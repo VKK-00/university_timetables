@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 from openpyxl import load_workbook
 
@@ -71,3 +72,27 @@ def test_export_rows_clear_template_sample_rows_when_sheet_is_short(tmp_path: Pa
     assert sheet["E3"].value == "Мікроекономіка"
     assert sheet["A4"].value is None
     assert sheet["E4"].value is None
+
+
+def test_manifest_serializes_provenance_fields(tmp_path: Path) -> None:
+    template_path = next(Path(".").glob("*.xlsx")).resolve()
+    rows = [
+        NormalizedRow(
+            program="Demo Program",
+            faculty="Demo Faculty",
+            week_type="Обидва",
+            day="Понеділок",
+            start_time="08:00",
+            end_time="09:20",
+            subject="Предмет",
+            source_name="demo-source",
+            source_kind="web_page",
+            source_root_url="https://example.edu/schedule",
+            asset_locator="https://docs.google.com/spreadsheets/d/demo/edit",
+        )
+    ]
+    _, manifest_path, _ = export_rows(rows, [], template_path=template_path, output_dir=tmp_path / "out")
+    payload = json.loads(manifest_path.read_text(encoding="utf-8").splitlines()[0])
+    assert payload["source_name"] == "demo-source"
+    assert payload["source_root_url"] == "https://example.edu/schedule"
+    assert payload["asset_locator"] == "https://docs.google.com/spreadsheets/d/demo/edit"

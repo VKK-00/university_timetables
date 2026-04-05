@@ -9,7 +9,7 @@ from typing import Iterable
 from openpyxl import Workbook, load_workbook
 
 from .models import NormalizedRow
-from .utils import ensure_parent, json_dumps, slugify_filename, truncate_sheet_title
+from .utils import coalesce_label, ensure_parent, json_dumps, slugify_filename, truncate_sheet_title
 
 
 REVIEW_COLUMNS = [
@@ -18,8 +18,10 @@ REVIEW_COLUMNS = [
     "sheet_name",
     "confidence",
     "warnings",
+    "source_name",
     "source_kind",
-    "source_url_or_path",
+    "source_root_url",
+    "asset_locator",
     "raw_excerpt",
     "week_type",
     "day",
@@ -89,7 +91,8 @@ def export_rows(
 def _export_program_workbooks(rows: list[NormalizedRow], *, template_path: Path, output_dir: Path) -> list[Path]:
     grouped: dict[tuple[str, str], list[NormalizedRow]] = defaultdict(list)
     for row in rows:
-        grouped[(row.faculty, row.program)].append(row)
+        grouped[(_export_faculty_label(row), _export_program_label(row))].append(row)
+
     exported: list[Path] = []
     for (faculty, program), program_rows in grouped.items():
         workbook = load_workbook(template_path)
@@ -98,7 +101,7 @@ def _export_program_workbooks(rows: list[NormalizedRow], *, template_path: Path,
         _prepare_output_sheet(template_sheet, program=program, style_pack=style_pack)
         sheet_map: dict[str, list[NormalizedRow]] = defaultdict(list)
         for row in sorted(program_rows, key=_sort_key):
-            sheet_map[row.sheet_name or "Аркуш1"].append(row)
+            sheet_map[_export_sheet_label(row)].append(row)
         first_sheet = True
         for sheet_name, sheet_rows in sheet_map.items():
             sheet = template_sheet if first_sheet else workbook.copy_worksheet(template_sheet)
@@ -137,8 +140,11 @@ def _write_manifest(rows: Iterable[NormalizedRow], path: Path) -> None:
                         "groups": row.groups,
                         "course": row.course,
                         "notes": row.notes,
+                        "source_name": row.source_name,
                         "source_kind": row.source_kind,
-                        "source_url_or_path": row.source_url_or_path,
+                        "source_root_url": row.source_root_url,
+                        "asset_locator": row.asset_locator,
+                        "source_url_or_path": row.source_root_url,
                         "confidence": row.confidence,
                         "warnings": row.warnings,
                         "raw_excerpt": row.raw_excerpt,
@@ -167,8 +173,10 @@ def _write_review_queue(rows: list[NormalizedRow], path: Path, *, template_path:
             "sheet_name": row.sheet_name,
             "confidence": row.confidence,
             "warnings": ", ".join(row.warnings),
+            "source_name": row.source_name,
             "source_kind": row.source_kind,
-            "source_url_or_path": row.source_url_or_path,
+            "source_root_url": row.source_root_url,
+            "asset_locator": row.asset_locator,
             "raw_excerpt": row.raw_excerpt,
             "week_type": row.week_type,
             "day": row.day,
@@ -257,6 +265,18 @@ def _apply_cell_style(cell, style: CellStyleSnapshot) -> None:
     cell.alignment = copy(style.alignment)
     cell.protection = copy(style.protection)
     cell.number_format = style.number_format
+
+
+def _export_faculty_label(row: NormalizedRow) -> str:
+    return coalesce_label(row.faculty, row.source_name, fallback="unknown faculty")
+
+
+def _export_program_label(row: NormalizedRow) -> str:
+    return coalesce_label(row.program, row.sheet_name, row.source_name, fallback="unknown program")
+
+
+def _export_sheet_label(row: NormalizedRow) -> str:
+    return coalesce_label(row.sheet_name, row.course, row.program, fallback="Аркуш1")
 
 
 def _sort_key(row: NormalizedRow) -> tuple[int, str, str, str]:

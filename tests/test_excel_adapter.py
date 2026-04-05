@@ -107,3 +107,47 @@ def test_fit_style_grid_workbook_is_parsed() -> None:
     assert record.values["week_type"] == "Верхній"
     assert record.values["teacher"] == "Вовна О. В."
     assert record.values["room"] == "109 ауд."
+
+
+def test_generic_grid_workbook_is_parsed() -> None:
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "1 курс"
+    worksheet["C1"] = "1 курс"
+    worksheet["C2"] = "група 1"
+    worksheet["A4"] = "Понеділок"
+    worksheet["B4"] = "8:40-10:15"
+    worksheet["C4"] = "Алгебра (лек)"
+    worksheet["C5"] = "доц. Іваненко І.І."
+    worksheet["C6"] = "ауд. 101"
+    worksheet["A8"] = "Вівторок"
+    worksheet["B8"] = "10:35-12:10"
+    worksheet["C8"] = "Геометрія"
+
+    buffer = BytesIO()
+    workbook.save(buffer)
+    asset = DiscoveredAsset(
+        source_name="generic-grid",
+        source_kind="file_url",
+        source_url_or_path="https://example.edu/schedule.xlsx",
+        asset_kind="file_url",
+        locator="https://example.edu/schedule.xlsx",
+        display_name="schedule.xlsx",
+    )
+    fetched = FetchedAsset(
+        asset=asset,
+        content=buffer.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        content_hash="generic-grid",
+        resolved_locator="generic-grid.xlsx",
+    )
+
+    document = parse_excel_asset(fetched)
+    total_records = sum(len(sheet.records) for sheet in document.sheets)
+
+    assert total_records >= 1
+    record = document.sheets[0].records[0]
+    assert record.values["day"] == "Понеділок"
+    assert record.values["start_time"] == "08:40"
+    assert record.values["end_time"] == "10:15"
+    assert "Алгебра" in record.values["subject"]

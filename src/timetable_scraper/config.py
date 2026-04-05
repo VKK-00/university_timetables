@@ -7,7 +7,7 @@ import yaml
 from .models import AppConfig, SourceConfig
 
 
-DEFAULT_KEYWORDS = ["розклад", "schedule", "занять", "пари", "semester", "курс"]
+DEFAULT_KEYWORDS = ["розклад", "schedule", "занять", "пари", "semester", "lessons", "timetable"]
 
 
 def _resolve_path(base_dir: Path, raw: str | None) -> Path | None:

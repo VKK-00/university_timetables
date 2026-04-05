@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
+import re
 import zipfile
 from pathlib import Path
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urldefrag, urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -13,19 +15,24 @@ from .utils import flatten_multiline, sha256_bytes
 
 SUPPORTED_FILE_SUFFIXES = {".xlsx", ".xlsm", ".xls", ".csv", ".pdf", ".html", ".htm"}
 LINK_RELEVANT_SUFFIXES = SUPPORTED_FILE_SUFFIXES | {".php", ".aspx", ""}
+GOOGLE_FOLDER_RE = re.compile(r"/drive/folders/([A-Za-z0-9_-]+)")
+GOOGLE_EMBEDDED_URL_RE = re.compile(r"https:[^<\s]*?(?=(?:\\x22|\"|'|<|\s))")
+ABSOLUTE_URL_RE = re.compile(r"https?://[^\"'\\s<>]+", re.IGNORECASE)
+RELATIVE_FILE_RE = re.compile(r"(?P<url>/[^\"'\\s<>]+(?:\.xlsx|\.xlsm|\.xls|\.csv|\.pdf)(?:\?[^\"'\\s<>]*)?)", re.IGNORECASE)
 
 
 def discover_sources(sources: list[SourceConfig], session: requests.Session | None = None) -> DiscoveryResult:
     assets: list[DiscoveredAsset] = []
     issues: list[DiscoveryIssue] = []
-    seen: set[str] = set()
+    seen: set[tuple[str, str]] = set()
     session = session or requests.Session()
     for source in sources:
         result = discover_source(source, session=session)
         for asset in result.assets:
-            if asset.locator in seen:
+            key = (asset.source_name, asset.locator)
+            if key in seen:
                 continue
-            seen.add(asset.locator)
+            seen.add(key)
             assets.append(asset)
         issues.extend(result.issues)
     return DiscoveryResult(assets=assets, issues=issues)
@@ -38,15 +45,18 @@ def discover_source(source: SourceConfig, session: requests.Session | None = Non
     if source.kind == "zip":
         return _discover_zip(source)
     if source.kind in {"file_url", "google_sheet"}:
+        root = source.url or ""
         return DiscoveryResult(
             assets=[
                 DiscoveredAsset(
                     source_name=source.name,
                     source_kind=source.kind,
-                    source_url_or_path=source.url or "",
                     asset_kind=source.kind,
-                    locator=source.url or "",
-                    display_name=source.url or source.name,
+                    locator=root,
+                    display_name=root or source.name,
+                    source_root_url=root,
+                    source_url_or_path=root,
+                    origin_kind="direct_file",
                 )
             ],
             issues=[],
@@ -56,6 +66,7 @@ def discover_source(source: SourceConfig, session: requests.Session | None = Non
             source,
             session=session,
             url=source.url,
+            root_url=source.url,
             current_depth=0,
             max_depth=source.follow_links_depth,
             visited=set(),
@@ -73,10 +84,12 @@ def _discover_folder(source: SourceConfig) -> DiscoveryResult:
         DiscoveredAsset(
             source_name=source.name,
             source_kind=source.kind,
-            source_url_or_path=str(source.path),
             asset_kind="local_file",
             locator=str(path.resolve()),
             display_name=path.name,
+            source_root_url=str(source.path.resolve()),
+            source_url_or_path=str(source.path.resolve()),
+            origin_kind="direct_file",
         )
         for path in sorted(source.path.glob(pattern))
         if path.is_file() and path.suffix.lower() in SUPPORTED_FILE_SUFFIXES
@@ -97,10 +110,12 @@ def _discover_zip(source: SourceConfig) -> DiscoveryResult:
                     DiscoveredAsset(
                         source_name=source.name,
                         source_kind=source.kind,
-                        source_url_or_path=str(source.path),
                         asset_kind="zip_entry",
                         locator=f"{source.path.resolve()}::{entry_name}",
                         display_name=Path(entry_name).name,
+                        source_root_url=str(source.path.resolve()),
+                        source_url_or_path=str(source.path.resolve()),
+                        origin_kind="direct_file",
                         metadata={"zip_path": str(source.path.resolve()), "entry_name": entry_name},
                     )
                 )
@@ -114,16 +129,18 @@ def _discover_web_page(
     session: requests.Session,
     *,
     url: str | None,
+    root_url: str | None,
     current_depth: int,
     max_depth: int,
     visited: set[str],
 ) -> DiscoveryResult:
     assert url is not None
     issues: list[DiscoveryIssue] = []
-    normalized_url = url.rstrip("/")
+    normalized_url = urldefrag(url.rstrip("/"))[0]
     if normalized_url in visited:
         return DiscoveryResult(assets=[], issues=[])
     visited.add(normalized_url)
+
     try:
         response = session.get(url, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
         response.raise_for_status()
@@ -132,79 +149,379 @@ def _discover_web_page(
             assets=[],
             issues=[DiscoveryIssue(source_name=source.name, reason=str(exc), locator=url)],
         )
+
+    root_url = root_url or url
     html = response.text
     soup = BeautifulSoup(html, "lxml")
     page_title = flatten_multiline(soup.title.get_text(" ", strip=True) if soup.title else source.name)
-    page_assets = [
+    page_assets: list[DiscoveredAsset] = [
         DiscoveredAsset(
             source_name=source.name,
             source_kind=source.kind,
-            source_url_or_path=url,
             asset_kind="html_page",
             locator=url,
             display_name=page_title or url,
-            metadata={"html": html, "table_count": len(soup.find_all("table"))},
+            source_root_url=root_url,
+            source_url_or_path=root_url,
+            origin_kind="official_page",
+            metadata={"html": html, "table_count": len(soup.find_all("table")), "discovered_from": url},
         )
     ]
+
     for index, table in enumerate(soup.find_all("table"), start=1):
         table_html = str(table)
         page_assets.append(
             DiscoveredAsset(
                 source_name=source.name,
                 source_kind=source.kind,
-                source_url_or_path=url,
                 asset_kind="html_table",
                 locator=f"{url}#table-{index}-{sha256_bytes(table_html.encode('utf-8'))[:10]}",
                 display_name=f"{page_title} [table {index}]",
-                metadata={"html": table_html, "page_url": url, "page_title": page_title},
+                source_root_url=root_url,
+                source_url_or_path=root_url,
+                origin_kind="official_page",
+                metadata={"html": table_html, "page_url": url, "page_title": page_title, "discovered_from": url},
             )
         )
-    allowed_domains = set(source.allow_domains)
-    base_host = urlparse(url).netloc
-    if base_host:
-        allowed_domains.add(base_host)
-    for tag in soup.find_all(["a", "iframe", "embed"]):
-        href = tag.get("href") or tag.get("src")
-        if not href:
-            continue
-        resolved = urljoin(url, href)
+
+    dropfiles_assets, dropfiles_issues = _discover_dropfiles_assets(
+        source,
+        session=session,
+        root_url=root_url,
+        page_url=url,
+        soup=soup,
+    )
+    page_assets.extend(dropfiles_assets)
+    issues.extend(dropfiles_issues)
+
+    allowed_domains = _build_allowed_domains(source, url)
+    for resolved, label in _extract_link_candidates(soup, html, page_url=url):
         parsed = urlparse(resolved)
         suffix = Path(parsed.path).suffix.lower()
-        if suffix not in LINK_RELEVANT_SUFFIXES and "google.com" not in parsed.netloc and "drive.google.com" not in parsed.netloc:
+        if suffix not in LINK_RELEVANT_SUFFIXES and not _is_storage_url(parsed.netloc):
             continue
-        if allowed_domains and parsed.netloc and parsed.netloc not in allowed_domains and not parsed.netloc.endswith("google.com"):
+        if not _is_allowed_domain(parsed.netloc, allowed_domains):
             issues.append(DiscoveryIssue(source_name=source.name, reason="Rejected by domain filter", locator=resolved))
             continue
-        asset_kind = "file_url"
-        if "docs.google.com" in parsed.netloc or "drive.google.com" in parsed.netloc:
-            asset_kind = "google_sheet"
-        elif suffix in {".html", ".htm", ".php", ".aspx", ""}:
-            asset_kind = "web_link"
-        label = flatten_multiline(tag.get_text(" ", strip=True)) or tag.get("title") or resolved
+        if _is_google_drive_folder(resolved):
+            folder_assets, folder_issues = _discover_google_drive_folder(
+                source,
+                session=session,
+                folder_url=resolved,
+                root_url=root_url,
+            )
+            page_assets.extend(folder_assets)
+            issues.extend(folder_issues)
+            continue
+        asset_kind, origin_kind = _classify_candidate(resolved, suffix=suffix)
+        score = _score_page(f"{label} {resolved}", source.schedule_keywords)
+        if asset_kind == "web_link" and score <= 0:
+            continue
         page_assets.append(
             DiscoveredAsset(
                 source_name=source.name,
                 source_kind=source.kind,
-                source_url_or_path=url,
                 asset_kind=asset_kind,
                 locator=resolved,
-                display_name=label,
-                metadata={"score": _score_page(f"{label} {resolved}", source.schedule_keywords)},
+                display_name=label or resolved,
+                source_root_url=root_url,
+                source_url_or_path=root_url,
+                origin_kind=origin_kind,
+                metadata={"score": score, "discovered_from": url},
             )
         )
-        if asset_kind == "web_link" and current_depth < max_depth and _score_page(f"{label} {resolved}", source.schedule_keywords) > 0:
+        if asset_kind == "web_link" and current_depth < max_depth and score > 0:
             nested = _discover_web_page(
                 source,
                 session=session,
                 url=resolved,
+                root_url=root_url,
                 current_depth=current_depth + 1,
                 max_depth=max_depth,
                 visited=visited,
             )
             page_assets.extend(nested.assets)
             issues.extend(nested.issues)
+
+    page_assets = _dedupe_assets(page_assets)
     page_assets.sort(key=lambda asset: (-int(asset.metadata.get("score", 0)), asset.locator))
     return DiscoveryResult(assets=page_assets, issues=issues)
+
+
+def _discover_google_drive_folder(
+    source: SourceConfig,
+    session: requests.Session,
+    *,
+    folder_url: str,
+    root_url: str,
+) -> tuple[list[DiscoveredAsset], list[DiscoveryIssue]]:
+    try:
+        response = session.get(folder_url, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
+        response.raise_for_status()
+    except Exception as exc:
+        return [], [DiscoveryIssue(source_name=source.name, reason=str(exc), locator=folder_url)]
+    assets: list[DiscoveredAsset] = []
+    seen: set[str] = set()
+    for match in GOOGLE_EMBEDDED_URL_RE.findall(response.text):
+        resolved = _decode_embedded_url(match)
+        if "{" in resolved or "}" in resolved or "/encrypted/" in resolved:
+            continue
+        parsed = urlparse(resolved)
+        if parsed.netloc not in {"docs.google.com", "drive.google.com"}:
+            continue
+        if not any(token in parsed.path for token in ("/spreadsheets/d/", "/file/d/", "/document/d/", "/presentation/d/")):
+            continue
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        asset_kind = "google_sheet" if "/spreadsheets/d/" in parsed.path else "file_url"
+        assets.append(
+            DiscoveredAsset(
+                source_name=source.name,
+                source_kind=source.kind,
+                asset_kind=asset_kind,
+                locator=resolved,
+                display_name=resolved,
+                source_root_url=root_url,
+                source_url_or_path=root_url,
+                origin_kind="public_folder",
+                metadata={
+                    "score": _score_page(resolved, source.schedule_keywords),
+                    "via_drive_folder": folder_url,
+                    "discovered_from": folder_url,
+                },
+            )
+        )
+    if assets:
+        return assets, []
+    return [], [DiscoveryIssue(source_name=source.name, reason="No files found in public Google Drive folder", locator=folder_url)]
+
+
+def _discover_dropfiles_assets(
+    source: SourceConfig,
+    session: requests.Session,
+    *,
+    root_url: str,
+    page_url: str,
+    soup: BeautifulSoup,
+) -> tuple[list[DiscoveredAsset], list[DiscoveryIssue]]:
+    assets: list[DiscoveredAsset] = []
+    issues: list[DiscoveryIssue] = []
+    seen_categories: set[str] = set()
+    base_url = f"{urlparse(page_url).scheme}://{urlparse(page_url).netloc}"
+    for container in soup.select(".dropfiles-content[data-category]"):
+        top_category = container.get("data-category")
+        if not top_category:
+            continue
+        category_links = container.select(".dropfilescategory.catlink[data-idcat]")
+        for link in category_links:
+            category_id = str(link.get("data-idcat") or "").strip()
+            if not category_id or category_id in seen_categories:
+                continue
+            seen_categories.add(category_id)
+            category_assets, category_issues = _discover_dropfiles_category(
+                source,
+                session=session,
+                base_url=base_url,
+                root_url=root_url,
+                page_url=page_url,
+                top_category=top_category,
+                category_id=category_id,
+                category_label=flatten_multiline(link.get_text(" ", strip=True)) or link.get("title") or category_id,
+                visited=set(),
+            )
+            assets.extend(category_assets)
+            issues.extend(category_issues)
+    return _dedupe_assets(assets), issues
+
+
+def _discover_dropfiles_category(
+    source: SourceConfig,
+    session: requests.Session,
+    *,
+    base_url: str,
+    root_url: str,
+    page_url: str,
+    top_category: str,
+    category_id: str,
+    category_label: str,
+    visited: set[str],
+) -> tuple[list[DiscoveredAsset], list[DiscoveryIssue]]:
+    if category_id in visited:
+        return [], []
+    visited.add(category_id)
+    assets: list[DiscoveredAsset] = []
+    issues: list[DiscoveryIssue] = []
+
+    files_url = f"{base_url}/index.php?option=com_dropfiles&view=frontfiles&format=json&id={category_id}"
+    try:
+        files_response = session.get(files_url, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
+        files_response.raise_for_status()
+        files_payload = files_response.json()
+    except Exception as exc:
+        return [], [DiscoveryIssue(source_name=source.name, reason=f"Dropfiles files load failed: {exc}", locator=files_url)]
+
+    for file_item in files_payload.get("files", []):
+        resolved = flatten_multiline(
+            file_item.get("link")
+            or file_item.get("link_download_popup")
+            or file_item.get("openpdflink")
+            or file_item.get("remoteurl")
+        )
+        if not resolved:
+            continue
+        parsed = urlparse(resolved)
+        suffix = Path(parsed.path).suffix.lower()
+        asset_kind, origin_kind = _classify_candidate(resolved, suffix=suffix)
+        assets.append(
+            DiscoveredAsset(
+                source_name=source.name,
+                source_kind=source.kind,
+                asset_kind=asset_kind,
+                locator=resolved,
+                display_name=flatten_multiline(file_item.get("title")) or resolved,
+                source_root_url=root_url,
+                source_url_or_path=root_url,
+                origin_kind=origin_kind,
+                metadata={
+                    "score": _score_page(f"{category_label} {file_item.get('title', '')}", source.schedule_keywords),
+                    "dropfiles_category": category_id,
+                    "dropfiles_category_label": category_label,
+                    "discovered_from": page_url,
+                },
+            )
+        )
+
+    categories_url = f"{base_url}/index.php?option=com_dropfiles&view=frontcategories&format=json&id={category_id}&top={top_category}"
+    try:
+        categories_response = session.get(categories_url, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
+        categories_response.raise_for_status()
+        categories_payload = categories_response.json()
+    except Exception as exc:
+        issues.append(DiscoveryIssue(source_name=source.name, reason=f"Dropfiles categories load failed: {exc}", locator=categories_url))
+        return assets, issues
+
+    for category in categories_payload.get("categories", []):
+        child_id = str(category.get("id") or "").strip()
+        if not child_id:
+            continue
+        child_assets, child_issues = _discover_dropfiles_category(
+            source,
+            session=session,
+            base_url=base_url,
+            root_url=root_url,
+            page_url=page_url,
+            top_category=top_category,
+            category_id=child_id,
+            category_label=flatten_multiline(category.get("title")) or child_id,
+            visited=visited,
+        )
+        assets.extend(child_assets)
+        issues.extend(child_issues)
+    return assets, issues
+
+
+def _extract_link_candidates(soup: BeautifulSoup, html: str, *, page_url: str) -> list[tuple[str, str]]:
+    candidates: list[tuple[str, str]] = []
+    for tag in soup.find_all(["a", "iframe", "embed", "source"]):
+        href = tag.get("href") or tag.get("src") or tag.get("data-src") or tag.get("data-href")
+        if not href:
+            continue
+        resolved = _normalize_candidate_url(urljoin(page_url, href))
+        if resolved:
+            label = flatten_multiline(tag.get_text(" ", strip=True)) or tag.get("title") or resolved
+            candidates.append((resolved, label))
+
+    for match in ABSOLUTE_URL_RE.findall(html):
+        resolved = _normalize_candidate_url(_decode_embedded_url(match))
+        if not resolved or not _looks_like_asset_candidate(resolved):
+            continue
+        candidates.append((resolved, resolved))
+
+    for match in RELATIVE_FILE_RE.finditer(html):
+        resolved = _normalize_candidate_url(urljoin(page_url, _decode_embedded_url(match.group("url"))))
+        if resolved:
+            candidates.append((resolved, resolved))
+    return candidates
+
+
+def _normalize_candidate_url(url: str) -> str:
+    resolved = urldefrag(url.strip())[0]
+    if not resolved:
+        return ""
+    return resolved.replace("&amp;", "&")
+
+
+def _looks_like_asset_candidate(url: str) -> bool:
+    parsed = urlparse(url)
+    host = parsed.netloc.casefold().removeprefix("www.")
+    if host and "." not in host and host != "localhost":
+        return False
+    suffix = Path(parsed.path).suffix.lower()
+    return suffix in LINK_RELEVANT_SUFFIXES or _is_storage_url(parsed.netloc)
+
+
+def _build_allowed_domains(source: SourceConfig, url: str) -> set[str]:
+    allowed_domains = {domain.casefold().removeprefix("www.") for domain in source.allow_domains}
+    base_host = urlparse(url).netloc.casefold().removeprefix("www.")
+    if base_host:
+        allowed_domains.add(base_host)
+    return allowed_domains
+
+
+def _is_allowed_domain(netloc: str, allowed_domains: set[str]) -> bool:
+    host = netloc.casefold().removeprefix("www.")
+    if _is_storage_url(netloc):
+        return True
+    if not allowed_domains:
+        return True
+    return any(host == domain or host.endswith(f".{domain}") for domain in allowed_domains)
+
+
+def _is_storage_url(netloc: str) -> bool:
+    host = netloc.casefold().removeprefix("www.")
+    return host in {"docs.google.com", "drive.google.com", "1drv.ms", "onedrive.live.com"}
+
+
+def _classify_candidate(url: str, *, suffix: str) -> tuple[str, str]:
+    host = urlparse(url).netloc.casefold().removeprefix("www.")
+    if host in {"docs.google.com", "drive.google.com"}:
+        if "/spreadsheets/" in urlparse(url).path:
+            return "google_sheet", "resolved_storage"
+        return "file_url", "resolved_storage"
+    if host in {"1drv.ms", "onedrive.live.com"}:
+        return "file_url", "resolved_storage"
+    if suffix in {".html", ".htm", ".php", ".aspx", ""}:
+        return "web_link", "official_page"
+    return "file_url", "direct_file"
+
+
+def _dedupe_assets(assets: list[DiscoveredAsset]) -> list[DiscoveredAsset]:
+    deduped: list[DiscoveredAsset] = []
+    seen: set[tuple[str, str, str]] = set()
+    for asset in assets:
+        key = (asset.source_name, asset.asset_kind, asset.locator)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(asset)
+    return deduped
+
+
+def _is_google_drive_folder(url: str) -> bool:
+    parsed = urlparse(url)
+    return parsed.netloc == "drive.google.com" and bool(GOOGLE_FOLDER_RE.search(parsed.path))
+
+
+def _decode_embedded_url(value: str) -> str:
+    return (
+        value.replace("\\u003d", "=")
+        .replace("\\u0026", "&")
+        .replace("\\u002F", "/")
+        .replace("\\=", "=")
+        .replace("\\&", "&")
+        .replace("\\/", "/")
+    )
 
 
 def _score_page(text: str, keywords: list[str]) -> int:

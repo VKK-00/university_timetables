@@ -35,9 +35,31 @@ DAY_NAMES = {
     "неділя": "Неділя",
 }
 
-TIME_RANGE_RE = re.compile(
-    r"(?P<start>\d{1,2}[:.]\d{2})\s*[-–—]\s*(?P<end>\d{1,2}[:.]\d{2})"
-)
+TIME_RANGE_RE = re.compile(r"(?P<start>\d{1,2}[:.]\d{2})\s*[-–—]\s*(?P<end>\d{1,2}[:.]\d{2})")
+STORAGE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{16,}$")
+NUMERIC_TOKEN_RE = re.compile(r"^\d+(?:[._-]\d+)*$")
+KNOWN_SOURCE_LABELS = {
+    "fit.knu.ua": "Факультет інформаційних технологій",
+    "phys.knu.ua": "Фізичний факультет",
+    "sociology.knu.ua": "Факультет соціології",
+    "econom.knu.ua": "Економічний факультет",
+    "biomed.knu.ua": "ННЦ Інститут біології та медицини",
+    "chem.knu.ua": "Хімічний факультет",
+    "history.univ.kiev.ua": "Історичний факультет",
+    "history.knu.ua": "Історичний факультет",
+    "geo.knu.ua": "Географічний факультет",
+    "geol.univ.kiev.ua": "Геологічний факультет",
+    "mechmat.knu.ua": "Механіко-математичний факультет",
+    "psy.knu.ua": "Факультет психології",
+    "law.knu.ua": "Юридичний факультет",
+    "rex.knu.ua": "Радіофізичний факультет",
+    "iht.knu.ua": "ННІ високих технологій",
+    "iir.edu.ua": "Інститут міжнародних відносин",
+    "journ.knu.ua": "ННІ журналістики",
+    "philology.knu.ua": "ННІ філології",
+    "philosophy.knu.ua": "Філософський факультет",
+    "mil.knu.ua": "Військовий інститут",
+}
 
 
 def normalize_whitespace(value: Any) -> str:
@@ -97,6 +119,44 @@ def normalize_day(value: Any) -> str:
     return DAY_NAMES.get(text, flatten_multiline(value))
 
 
+def humanize_source_name(value: str) -> str:
+    text = normalize_whitespace(value.replace("_", " ").replace("-", " "))
+    return text.title() if text else ""
+
+
+def looks_like_storage_identifier(value: Any) -> bool:
+    text = flatten_multiline(value)
+    if not text:
+        return False
+    if text.startswith(("http://", "https://")):
+        return True
+    if STORAGE_ID_RE.fullmatch(text):
+        return True
+    if NUMERIC_TOKEN_RE.fullmatch(text):
+        return True
+    return False
+
+
+def is_meaningful_label(value: Any) -> bool:
+    text = flatten_multiline(value)
+    lowered = text.casefold()
+    if not text:
+        return False
+    if lowered in {"невідома програма", "невідомий факультет", "sheet1", "аркуш1", "demo"}:
+        return False
+    if looks_like_storage_identifier(text):
+        return False
+    return True
+
+
+def coalesce_label(*candidates: Any, fallback: str = "") -> str:
+    for candidate in candidates:
+        text = flatten_multiline(candidate)
+        if is_meaningful_label(text):
+            return text
+    return flatten_multiline(fallback)
+
+
 def slugify_filename(value: str, fallback: str = "untitled") -> str:
     text = unicodedata.normalize("NFKD", value)
     text = "".join(ch for ch in text if not unicodedata.combining(ch))
@@ -130,15 +190,23 @@ def excerpt_from_values(values: dict[str, Any], limit: int = 6) -> str:
 
 
 def infer_faculty_from_locator(locator: str) -> str:
+    parsed = urlparse(locator)
+    host = parsed.netloc.casefold().removeprefix("www.")
+    if host in KNOWN_SOURCE_LABELS:
+        return KNOWN_SOURCE_LABELS[host]
     if "::" in locator:
         _, inner = locator.split("::", 1)
         parts = [part for part in inner.split("/") if part]
         if len(parts) >= 2:
             return parts[1]
+    if parsed.scheme and parsed.netloc:
+        path_parts = [part for part in parsed.path.split("/") if part]
+        if len(path_parts) >= 2 and not looks_like_storage_identifier(path_parts[-2]):
+            return path_parts[-2]
+        return parsed.netloc or "Невідомий факультет"
     parts = [part for part in re.split(r"[\\/]", locator) if part]
-    if len(parts) >= 2:
+    if len(parts) >= 2 and not looks_like_storage_identifier(parts[-2]):
         return parts[-2]
-    host = urlparse(locator).netloc
     return host or "Невідомий факультет"
 
 

@@ -1,0 +1,141 @@
+template_path: ../Шаблон.xlsx
+output_dir: ../out_knu_web
+cache_dir: ../.cache/timetable_scraper_knu_web
+confidence_threshold: 0.74
+ocr_enabled: true
+sources:
+  - name: geo-schedule
+    kind: web_page
+    url: https://geo.knu.ua/navchannya/rozklad-zanyat/
+    allow_domains:
+      - geo.knu.ua
+    follow_links_depth: 0
+  - name: econom-schedule
+    kind: web_page
+    url: https://econom.knu.ua/for_students/schedule/rozklad/
+    allow_domains:
+      - econom.knu.ua
+    follow_links_depth: 0
+  - name: history-schedule
+    kind: web_page
+    url: https://history.univ.kiev.ua/studentam/schedule/
+    allow_domains:
+      - history.univ.kiev.ua
+      - history.knu.ua
+      - docs.google.com
+      - drive.google.com
+    follow_links_depth: 0
+  - name: mechmat-schedule
+    kind: web_page
+    url: https://mechmat.knu.ua/golovna/studentu/rozklad/
+    allow_domains:
+      - mechmat.knu.ua
+      - www.mechmat.knu.ua
+    follow_links_depth: 0
+  - name: fit-schedule
+    kind: web_page
+    url: https://fit.knu.ua/for-students/lessons-schedule
+    allow_domains:
+      - fit.knu.ua
+      - fit.univ.kiev.ua
+      - docs.google.com
+      - drive.google.com
+    follow_links_depth: 0
+  - name: csc-schedule
+    kind: web_page
+    url: https://csc.knu.ua/uk/schedule/
+    allow_domains:
+      - csc.knu.ua
+      - www.csc.knu.ua
+    follow_links_depth: 0
+  - name: psy-schedule
+    kind: web_page
+    url: https://psy.knu.ua/study/schedule
+    allow_domains:
+      - psy.knu.ua
+    follow_links_depth: 1
+  - name: rex-schedule
+    kind: web_page
+    url: https://rex.knu.ua/for-students/class-times/
+    allow_domains:
+      - rex.knu.ua
+    follow_links_depth: 0
+  - name: sociology-schedule
+    kind: web_page
+    url: https://sociology.knu.ua/uk/students
+    allow_domains:
+      - sociology.knu.ua
+      - docs.google.com
+      - drive.google.com
+    follow_links_depth: 0
+  - name: phys-schedule
+    kind: web_page
+    url: https://phys.knu.ua/navchannya/rozklad-zanyat?ad
+    allow_domains:
+      - phys.knu.ua
+      - www.phys.knu.ua
+    follow_links_depth: 0
+  - name: philosophy-schedule
+    kind: web_page
+    url: https://www.philosophy.knu.ua/study/educational-process
+    allow_domains:
+      - philosophy.knu.ua
+      - www.philosophy.knu.ua
+    follow_links_depth: 0
+  - name: chem-schedule
+    kind: web_page
+    url: https://chem.knu.ua/ua/teaching_resources/teaching_schedule/
+    allow_domains:
+      - chem.knu.ua
+    follow_links_depth: 0
+  - name: law-schedule
+    kind: web_page
+    url: https://law.knu.ua/schedule/
+    allow_domains:
+      - law.knu.ua
+      - law.univ.kiev.ua
+    follow_links_depth: 0
+  - name: military-schedule
+    kind: web_page
+    url: https://mil.knu.ua
+    allow_domains:
+      - mil.knu.ua
+      - viknu.mil.gov.ua
+    follow_links_depth: 1
+  - name: iht-schedule
+    kind: file_url
+    url: https://iht.knu.ua/wp-content/uploads/2026/02/RozkladННІВТ-2-25-26.pdf
+  - name: iir-schedule
+    kind: web_page
+    url: https://www.iir.edu.ua/rozklad
+    allow_domains:
+      - www.iir.edu.ua
+      - iir.edu.ua
+      - 1drv.ms
+      - onedrive.live.com
+    follow_links_depth: 0
+  - name: journ-schedule
+    kind: web_page
+    url: https://journ.knu.ua/rozklad-zaniat/
+    allow_domains:
+      - journ.knu.ua
+    follow_links_depth: 0
+  - name: philology-schedule
+    kind: web_page
+    url: https://philology.knu.ua/nauka/aspirantura/rozklad-zanyat/
+    allow_domains:
+      - philology.knu.ua
+      - docs.google.com
+      - drive.google.com
+    follow_links_depth: 0
+  - name: geology-schedule
+    kind: file_url
+    url: http://www.geol.univ.kiev.ua/rozklad/rozklad_II_sem_2025_2026.xlsx
+  - name: biomed-schedule
+    kind: web_page
+    url: https://biomed.knu.ua/students-postgraduates/general-information/rozklad-zaniat.html
+    allow_domains:
+      - biomed.knu.ua
+      - docs.google.com
+      - drive.google.com
+    follow_links_depth: 0

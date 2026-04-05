@@ -71,6 +71,36 @@ def test_discovery_follows_nested_pages_when_depth_is_enabled() -> None:
     assert any(asset.asset_kind == "html_table" and asset.metadata.get("page_url") == nested_url for asset in result.assets)
 
 
+def test_discovery_expands_public_google_drive_folders() -> None:
+    root_url = "https://example.edu/faculty/history"
+    folder_url = "https://drive.google.com/drive/folders/folder123?usp=sharing"
+    root_html = f"""
+    <html><body>
+      <a href="{folder_url}">Розклад бакалаврів</a>
+    </body></html>
+    """
+    folder_html = r"""
+    <html><body><script>
+    window['_DRIVE_ivd'] = '\x5b\x22https:\/\/docs.google.com\/spreadsheets\/d\/sheet123\/edit?usp\u003ddrivesdk\u0026rtpof\u003dtrue\u0026sd\u003dtrue\x22,\x22https:\/\/drive.google.com\/file\/d\/file456\/view?usp\u003dsharing\x22';
+    </script></body></html>
+    """
+    session = FakeSession({root_url: root_html, folder_url: folder_html})
+    source = SourceConfig(
+        kind="web_page",
+        name="history-web",
+        url=root_url,
+        allow_domains=["example.edu", "drive.google.com", "docs.google.com"],
+        schedule_keywords=["розклад", "schedule"],
+    )
+    result = discover_source(source, session=session)
+    locators = {asset.locator for asset in result.assets}
+    assert "https://docs.google.com/spreadsheets/d/sheet123/edit?usp=drivesdk&rtpof=true&sd=true" in locators
+    assert "https://drive.google.com/file/d/file456/view?usp=sharing" in locators
+    assert any(asset.metadata.get("via_drive_folder") == folder_url for asset in result.assets)
+    assert all(asset.source_root_url == root_url for asset in result.assets if asset.locator != root_url)
+    assert any(asset.origin_kind == "public_folder" for asset in result.assets if asset.locator != root_url)
+
+
 def test_html_table_adapter_parses_rows() -> None:
     html = (WEB_DIR / "faculty_table.html").read_text(encoding="utf-8")
     asset = DiscoveredAsset(

@@ -47,6 +47,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Exported files: {len(result.exported_files)}")
         print(f"Manifest: {result.manifest_path}")
         print(f"Review queue: {result.review_queue_path}")
+        if result.source_summary_path:
+            print(f"Source summary: {result.source_summary_path}")
+        if result.source_report_path:
+            print(f"Source report: {result.source_report_path}")
         print(f"Accepted rows: {len(result.rows)}")
         print(f"Review rows: {len(result.review_rows)}")
         return 0

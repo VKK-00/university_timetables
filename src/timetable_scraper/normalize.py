@@ -2,12 +2,16 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from .models import NormalizedRow, ParsedDocument, RawRecord
 from .utils import (
     clean_numeric_artifact,
+    coalesce_label,
     flatten_multiline,
+    humanize_source_name,
+    infer_faculty_from_locator,
     normalize_day,
     normalize_header,
     normalize_week_type,
@@ -123,6 +127,11 @@ def normalize_document(document: ParsedDocument) -> list[NormalizedRow]:
 
 def normalize_record(record: RawRecord, *, document: ParsedDocument) -> NormalizedRow:
     values = defaultdict(str, {key: flatten_multiline(value) for key, value in record.values.items()})
+    source_asset = document.asset.asset
+    source_name = source_asset.source_name
+    source_root_url = source_asset.source_root_url or source_asset.source_url_or_path or source_asset.locator
+    source_label = humanize_source_name(source_name)
+
     subject_inferred = False
     if not values["subject"] and values["lesson_type"].casefold() in SUBJECT_FALLBACK_LESSON_TYPES:
         values["subject"] = values["lesson_type"]
@@ -144,11 +153,13 @@ def normalize_record(record: RawRecord, *, document: ParsedDocument) -> Normaliz
         values["subject"] = values["groups"]
         subject_inferred = True
         record.warnings.append("subject_inferred_from_groups")
+
     start_time = parse_time_value(values["start_time"])
     end_time = parse_time_value(values["end_time"])
     if (not start_time or not end_time) and values["raw_time"]:
         start_time, end_time = parse_time_range(values["raw_time"])
     start_time, end_time = _infer_missing_time_bounds(start_time, end_time, values)
+
     warnings = list(record.warnings)
     if not values["day"]:
         warnings.append("missing_day")
@@ -160,6 +171,7 @@ def normalize_record(record: RawRecord, *, document: ParsedDocument) -> Normaliz
         warnings.append("missing_subject")
     elif subject_inferred:
         warnings = [warning for warning in warnings if warning != "missing_subject"]
+
     confidence = score_record(
         has_day=bool(values["day"]),
         has_start=bool(start_time),
@@ -167,9 +179,25 @@ def normalize_record(record: RawRecord, *, document: ParsedDocument) -> Normaliz
         has_subject=bool(values["subject"]),
         warning_count=len(warnings),
     )
+
+    faculty = coalesce_label(
+        values["faculty"],
+        infer_faculty_from_locator(source_root_url),
+        source_label,
+        fallback="Невідомий факультет",
+    )
+    display_stem = Path(flatten_multiline(source_asset.display_name) or source_label).stem
+    program = coalesce_label(
+        values["program"],
+        record.sheet_name,
+        display_stem,
+        source_label,
+        fallback="Невідома програма",
+    )
+
     return NormalizedRow(
-        program=values["program"] or "Невідома програма",
-        faculty=values["faculty"] or "Невідомий факультет",
+        program=program,
+        faculty=faculty,
         week_type=normalize_week_type(values["week_type"]),
         day=normalize_day(values["day"]),
         start_time=start_time,
@@ -183,8 +211,11 @@ def normalize_record(record: RawRecord, *, document: ParsedDocument) -> Normaliz
         course=clean_numeric_artifact(values["course"]),
         notes=flatten_multiline(values["notes"]),
         sheet_name=record.sheet_name,
-        source_kind=document.asset.asset.source_kind,
-        source_url_or_path=document.asset.asset.source_url_or_path,
+        source_name=source_name,
+        source_kind=source_asset.source_kind,
+        source_root_url=source_root_url,
+        asset_locator=source_asset.locator,
+        source_url_or_path=source_root_url,
         confidence=confidence,
         warnings=warnings,
         raw_excerpt=record.raw_excerpt,
@@ -210,11 +241,7 @@ def score_record(
 
 
 def _should_skip_tabular_row(values: dict[str, Any]) -> bool:
-    signal_fields = {
-        field
-        for field, value in values.items()
-        if flatten_multiline(value)
-    }
+    signal_fields = {field for field, value in values.items() if flatten_multiline(value)}
     meaningful_fields = signal_fields - {"week_type", "day", "start_time", "end_time", "program", "faculty", "link"}
     if not meaningful_fields:
         return True

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from bs4 import BeautifulSoup
 
 from ..models import FetchedAsset, ParsedDocument, ParsedSheet, RawRecord
@@ -10,10 +12,11 @@ from ..utils import DAY_NAMES, excerpt_from_values, flatten_multiline, infer_fac
 def parse_html_asset(fetched_asset: FetchedAsset) -> ParsedDocument:
     html = fetched_asset.content.decode("utf-8", "ignore")
     soup = BeautifulSoup(html, "lxml")
-    faculty = infer_faculty_from_locator(fetched_asset.asset.locator)
+    faculty = infer_faculty_from_locator(fetched_asset.asset.source_root_url or fetched_asset.asset.locator)
     program = flatten_multiline(soup.title.get_text(" ", strip=True) if soup.title else fetched_asset.asset.display_name)
     sheets: list[ParsedSheet] = []
     warnings: list[str] = []
+
     for index, table in enumerate(soup.find_all("table"), start=1):
         rows = []
         for row in table.find_all("tr"):
@@ -33,9 +36,19 @@ def parse_html_asset(fetched_asset: FetchedAsset) -> ParsedDocument:
                 )
             )
             warnings.extend(row_warnings)
+
     if sheets:
         return ParsedDocument(asset=fetched_asset, sheets=sheets, warnings=warnings)
-    records = _parse_block_records(soup.get_text("\n", strip=True), sheet_name="page", faculty=faculty, program=program)
+
+    body_text = soup.get_text("\n", strip=True)
+    if _looks_like_link_index(soup, body_text):
+        warnings.append("HTML page is a link index without inline schedule rows.")
+        return ParsedDocument(asset=fetched_asset, sheets=[], warnings=warnings)
+
+    records = _parse_block_records(body_text, sheet_name="page", faculty=faculty, program=program)
+    if not records:
+        warnings.append("HTML page does not contain parseable inline schedule rows.")
+        return ParsedDocument(asset=fetched_asset, sheets=[], warnings=warnings)
     return ParsedDocument(
         asset=fetched_asset,
         sheets=[ParsedSheet(sheet_name="page", program=program, faculty=faculty, records=records)],
@@ -77,3 +90,11 @@ def _parse_block_records(text: str, *, sheet_name: str, faculty: str, program: s
             )
         )
     return records
+
+
+def _looks_like_link_index(soup: BeautifulSoup, body_text: str) -> bool:
+    links = soup.find_all("a")
+    schedule_signals = len(re.findall(r"\d{1,2}[:.]\d{2}\s*[-–—]\s*\d{1,2}[:.]\d{2}", body_text))
+    if schedule_signals >= 2:
+        return False
+    return len(links) >= 3 and schedule_signals == 0
