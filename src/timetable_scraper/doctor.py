@@ -18,7 +18,7 @@ REQUIRED_MODULES = [
 ]
 
 
-def run_doctor() -> tuple[bool, list[str]]:
+def run_doctor(*, require_tesseract: bool = True) -> tuple[bool, list[str]]:
     ok = True
     messages: list[str] = []
     for module_name in REQUIRED_MODULES:
@@ -30,8 +30,11 @@ def run_doctor() -> tuple[bool, list[str]]:
             messages.append(f"FAIL module {module_name}: {exc.__class__.__name__}")
     tesseract_path = configure_tesseract()
     if not tesseract_path:
-        messages.append("FAIL tesseract binary not found in PATH")
-        return False, messages
+        if require_tesseract:
+            messages.append("FAIL tesseract binary not found in PATH")
+            return False, messages
+        messages.append("WARN tesseract binary not found in PATH (OCR disabled)")
+        return ok, messages
     messages.append(f"OK tesseract {tesseract_path}")
     try:
         result = subprocess.run(

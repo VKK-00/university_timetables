@@ -39,7 +39,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "run":
         config = load_config(args.config)
-        ok, messages = run_doctor()
+        ok, messages = run_doctor(require_tesseract=config.ocr_enabled)
         print("\n".join(messages))
         if not ok:
             return 1

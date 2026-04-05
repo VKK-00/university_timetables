@@ -69,7 +69,7 @@ def test_fit_style_grid_workbook_is_parsed() -> None:
     worksheet["B5"] = "9:00-10:20"
     worksheet["C5"] = "Архітектура комп'ютера (лаб) 12т"
     worksheet.merge_cells("C5:D7")
-    worksheet["C8"] = "[08.09-01.12]"
+    worksheet["C8"] = "I тиждень"
     worksheet.merge_cells("C8:D8")
     worksheet["C9"] = "Вовна О. В."
     worksheet.merge_cells("C9:D9")
@@ -104,5 +104,6 @@ def test_fit_style_grid_workbook_is_parsed() -> None:
     assert record.values["end_time"] == "10:20"
     assert record.values["subject"] == "Архітектура комп'ютера"
     assert record.values["lesson_type"] == "лабораторна"
+    assert record.values["week_type"] == "Верхній"
     assert record.values["teacher"] == "Вовна О. В."
     assert record.values["room"] == "109 ауд."

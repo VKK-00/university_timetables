@@ -2,7 +2,7 @@ template_path: ../Шаблон.xlsx
 output_dir: ../out_fit
 cache_dir: ../.cache/timetable_scraper_fit
 confidence_threshold: 0.74
-ocr_enabled: true
+ocr_enabled: false
 sources:
   - name: fit-schedule-semester-1
     kind: google_sheet

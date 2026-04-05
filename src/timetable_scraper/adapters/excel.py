@@ -21,10 +21,19 @@ FIT_TEACHER_RE = re.compile(
 )
 FIT_ROOM_RE = re.compile(r"(?i)(ауд\.|корпус|корп\.|клінік|лаборатор|каб\.|online|онлайн)")
 FIT_LINK_RE = re.compile(r"(?i)(https?://|zoom|meet|teams|google meet|knu-ua\.zoom|id:\s*\d|код[:\s])")
-FIT_WEEK_RE = re.compile(r"(?i)(\[[^\]]+\]|\bч/т\b|\bпо\s+\d{2}\.\d{2}\b|\bз\s+\d{2}\.\d{2}\b)")
+FIT_WEEK_RE = re.compile(r"(?i)(\[[^\]]+\]|\bч/т\b|\bпо\s+\d{2}\.\d{2}\b|\bз\s+\d{2}\.\d{2}\b|\b(?:i|ii|1|2)\s*тиж)")
 FIT_COUNT_RE = re.compile(r"^\d+(?:\.0)?$")
 FIT_TRAILING_WEEKS_RE = re.compile(r"\s*(\[[^\]]+\])+\s*$")
 FIT_T_COUNT_RE = re.compile(r"\b(\d+)\s*т\b", re.IGNORECASE)
+FIT_WEEK_TYPE_PATTERNS = (
+    (re.compile(r"(?i)\bч/т\b"), "Через тиждень"),
+    (re.compile(r"(?i)\b(?:i|1)\s*тиж"), "Верхній"),
+    (re.compile(r"(?i)\b(?:ii|2)\s*тиж"), "Нижній"),
+    (re.compile(r"(?i)\bверх"), "Верхній"),
+    (re.compile(r"(?i)\bниж"), "Нижній"),
+    (re.compile(r"(?i)\bнепар"), "Верхній"),
+    (re.compile(r"(?i)\bпарн"), "Нижній"),
+)
 FIT_LESSON_TYPES = {
     "л": "лекція",
     "лек": "лекція",
@@ -192,9 +201,11 @@ def _parse_fit_grid_schedule_sheet(worksheet: Worksheet, *, faculty: str) -> tup
             teacher, room, link, notes = _collect_fit_metadata(subject_cell, block_cells)
             subject, lesson_type, subject_notes = _split_fit_subject(subject_cell.text)
             merged_notes = _merge_notes(subject_notes, notes)
+            week_type = _infer_fit_week_type(subject_cell.text, subject_notes, notes)
             values = {
                 "program": flatten_multiline(worksheet.title),
                 "faculty": faculty,
+                "week_type": week_type,
                 "day": day,
                 "start_time": start_time,
                 "end_time": end_time,
@@ -368,6 +379,18 @@ def _split_bracket_notes(text: str) -> tuple[str, list[str]]:
     notes = re.findall(r"\[[^\]]+\]", text)
     cleaned = re.sub(r"\[[^\]]+\]", "", text).strip()
     return cleaned, _unique_list(notes)
+
+
+def _infer_fit_week_type(subject_text: str, subject_notes: list[str], metadata_notes: list[str]) -> str:
+    candidates = [subject_text, *subject_notes, *metadata_notes]
+    for candidate in candidates:
+        cleaned = flatten_multiline(candidate)
+        if not cleaned:
+            continue
+        for pattern, week_type in FIT_WEEK_TYPE_PATTERNS:
+            if pattern.search(cleaned):
+                return week_type
+    return ""
 
 
 def _compose_fit_groups(header_context: dict[str, dict[int, str]], min_col: int, max_col: int) -> str:

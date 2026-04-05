@@ -16,9 +16,12 @@ def run_pipeline(config: AppConfig) -> PipelineOutput:
     discovery = discover_sources(config.sources, session=session)
     normalized_rows = []
     for asset in discovery.assets:
-        fetched = fetch_asset(asset, session=session, cache_dir=config.cache_dir)
-        parsed = parse_asset(fetched, ocr_enabled=config.ocr_enabled)
-        normalized_rows.extend(normalize_document(parsed))
+        try:
+            fetched = fetch_asset(asset, session=session, cache_dir=config.cache_dir)
+            parsed = parse_asset(fetched, ocr_enabled=config.ocr_enabled)
+            normalized_rows.extend(normalize_document(parsed))
+        except Exception:
+            continue
     accepted, review = partition_rows(normalized_rows, threshold=config.confidence_threshold)
     exported_files, manifest_path, review_queue_path = export_rows(
         accepted,
@@ -48,4 +51,3 @@ def inspect_config_source(config: AppConfig, source_name: str | None = None) -> 
         for issue in result.issues:
             chunks.append(f"  ! {issue.reason} ({issue.locator or 'n/a'})")
     return "\n".join(chunks)
-
