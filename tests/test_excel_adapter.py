@@ -151,3 +151,46 @@ def test_generic_grid_workbook_is_parsed() -> None:
     assert record.values["start_time"] == "08:40"
     assert record.values["end_time"] == "10:15"
     assert "Алгебра" in record.values["subject"]
+
+
+def test_generic_grid_workbook_supports_days_with_dates() -> None:
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "Журналістика"
+    worksheet["C1"] = "1 курс"
+    worksheet["C2"] = "група 1"
+    worksheet["A4"] = "Понеділок (02.09.2019)"
+    worksheet["B4"] = "14:10"
+    worksheet["C4"] = "Вступ до журналістики"
+    worksheet["C5"] = "доц. Іваненко І.І."
+    worksheet["A6"] = "Вівторок (03.09.2019)"
+    worksheet["B6"] = "15:50"
+    worksheet["C6"] = "Медіаправо"
+    worksheet["A8"] = "Середа (04.09.2019)"
+    worksheet["B8"] = "17:30"
+    worksheet["C8"] = "Практикум"
+
+    buffer = BytesIO()
+    workbook.save(buffer)
+    asset = DiscoveredAsset(
+        source_name="generic-grid-dates",
+        source_kind="file_url",
+        source_url_or_path="https://example.edu/journ.xlsx",
+        asset_kind="file_url",
+        locator="https://example.edu/journ.xlsx",
+        display_name="journ.xlsx",
+    )
+    fetched = FetchedAsset(
+        asset=asset,
+        content=buffer.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        content_hash="generic-grid-dates",
+        resolved_locator="journ.xlsx",
+    )
+
+    document = parse_excel_asset(fetched)
+    records = [record for sheet in document.sheets for record in sheet.records]
+
+    assert records
+    assert records[0].values["day"] == "Понеділок"
+    assert records[0].values["start_time"] == "14:10"

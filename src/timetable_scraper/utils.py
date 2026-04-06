@@ -35,7 +35,9 @@ DAY_NAMES = {
     "неділя": "Неділя",
 }
 
-TIME_RANGE_RE = re.compile(r"(?P<start>\d{1,2}[:.]\d{2})\s*[-–—]\s*(?P<end>\d{1,2}[:.]\d{2})")
+TIME_RANGE_RE = re.compile(
+    "(?P<start>(?:\\d{1,2}[:.]\\d{2}|\\d{3,4}|\\d(?:\\s+\\d){2,3}))\\s*(?:-|\\u2013|\\u2014)\\s*(?P<end>(?:\\d{1,2}[:.]\\d{2}|\\d{3,4}|\\d(?:\\s+\\d){2,3}))"
+)
 STORAGE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{16,}$")
 NUMERIC_TOKEN_RE = re.compile(r"^\d+(?:[._-]\d+)*$")
 KNOWN_SOURCE_LABELS = {
@@ -96,9 +98,20 @@ def parse_time_value(value: Any) -> str:
         return ""
     if isinstance(value, (int, float)) and 0 <= float(value) < 1.1:
         return excel_fraction_to_time(float(value))
-    match = re.search(r"(\d{1,2})[:.](\d{2})", flatten_multiline(value))
+    text = flatten_multiline(value)
+    match = re.search(r"(?<!\d)(\d{1,2})[:.](\d{2})(?![\d.])", text)
     if not match:
-        return ""
+        compact = re.fullmatch(r"(\d(?:\s+\d){2,3}|\d{3,4})", text)
+        if not compact:
+            return ""
+        digits = re.sub(r"\s+", "", compact.group(1))
+        if len(digits) == 3:
+            digits = f"0{digits}"
+        hours = int(digits[:-2])
+        minutes = int(digits[-2:])
+        if hours > 23 or minutes > 59:
+            return ""
+        return f"{hours:02d}:{minutes:02d}"
     return f"{int(match.group(1)):02d}:{int(match.group(2)):02d}"
 
 
@@ -116,7 +129,24 @@ def normalize_week_type(value: Any) -> str:
 
 def normalize_day(value: Any) -> str:
     text = flatten_multiline(value).casefold()
-    return DAY_NAMES.get(text, flatten_multiline(value))
+    if text in DAY_NAMES:
+        return DAY_NAMES[text]
+    simplified = re.sub(r"\([^)]*\)", " ", text)
+    simplified = simplified.replace("'", "").replace("’", "").replace("`", "")
+    simplified = re.sub(r"[^a-zа-яіїєґ]+", " ", simplified, flags=re.IGNORECASE)
+    normalized = normalize_whitespace(simplified)
+    if normalized in DAY_NAMES:
+        return DAY_NAMES[normalized]
+    collapsed = normalized.replace(" ", "")
+    if collapsed in DAY_NAMES:
+        return DAY_NAMES[collapsed]
+    reversed_collapsed = collapsed[::-1]
+    if reversed_collapsed in DAY_NAMES:
+        return DAY_NAMES[reversed_collapsed]
+    for key, canonical in DAY_NAMES.items():
+        if key in normalized or key in collapsed or key in reversed_collapsed:
+            return canonical
+    return flatten_multiline(value)
 
 
 def humanize_source_name(value: str) -> str:

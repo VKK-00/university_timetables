@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import requests
 
-from timetable_scraper.fetch import _fetch_onedrive_resolved
+from timetable_scraper.fetch import _fetch_onedrive_resolved, _resolve_content_type
 
 
 class StubResponse:
@@ -42,3 +42,14 @@ def test_onedrive_resolver_uses_direct_download_candidate(monkeypatch) -> None:
     resolved = _fetch_onedrive_resolved("https://1drv.ms/x/test", session=requests.Session(), fallback=fallback)
 
     assert resolved is downloaded
+
+
+def test_resolve_content_type_sniffs_pdf_from_octet_stream() -> None:
+    response = StubResponse(
+        url="https://example.edu/download?id=1",
+        status_code=200,
+        headers={"Content-Type": "application/octet-stream", "Content-Disposition": 'attachment; filename="schedule.pdf"'},
+        content=b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n",
+    )
+
+    assert _resolve_content_type(response, response.content, "https://example.edu/file") == "application/pdf"

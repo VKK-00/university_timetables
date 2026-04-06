@@ -34,7 +34,7 @@ def fetch_asset(asset: DiscoveredAsset, session: requests.Session, cache_dir: Pa
         response = _fetch_remote(asset.locator, session=session)
 
     content = response.content
-    content_type = response.headers.get("Content-Type", _guess_content_type(asset.locator))
+    content_type = _resolve_content_type(response, content, asset.locator)
     fetched = FetchedAsset(asset, content, content_type, sha256_bytes(content), response.url)
     suffix = _guess_suffix(content_type, asset.locator)
     cache_path = cache_dir / f"{fetched.content_hash[:16]}{suffix}"
@@ -81,9 +81,17 @@ def _fetch_google_resolved(url: str, session: requests.Session, fallback: reques
             ]
         )
     if doc_id and "file/d/" in parsed.path:
-        candidates.append(f"https://drive.google.com/uc?export=download&id={doc_id}")
+        candidates.extend(
+            [
+                f"https://drive.google.com/uc?export=download&id={doc_id}",
+                f"https://drive.usercontent.google.com/uc?id={doc_id}&export=download",
+                f"https://drive.usercontent.google.com/download?id={doc_id}&export=download",
+            ]
+        )
     if fallback is not None and "text/html" in fallback.headers.get("Content-Type", ""):
         for found in re.findall(r'https://[^"\\\']+(?:download|export)[^"\\\']+', fallback.text):
+            candidates.append(found.encode("utf-8").decode("unicode_escape"))
+        for found in re.findall(r'https://drive\.usercontent\.google\.com/[^"\\\']+', fallback.text):
             candidates.append(found.encode("utf-8").decode("unicode_escape"))
     for candidate in candidates:
         try:
@@ -233,3 +241,41 @@ def _guess_suffix(content_type: str, locator: str) -> str:
     if "html" in content_type:
         return ".html"
     return Path(urlparse(locator).path).suffix or ".bin"
+
+
+def _resolve_content_type(response: requests.Response, content: bytes, locator: str) -> str:
+    header = (response.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
+    if header and header not in {"application/octet-stream", "binary/octet-stream"}:
+        if header != "text/html" or not _looks_like_pdf(content):
+            return header
+    disposition_name = _extract_disposition_filename(response)
+    guessed_from_name = _guess_content_type(disposition_name or locator)
+    sniffed = _sniff_content_type(content, guessed_from_name)
+    if sniffed != "application/octet-stream":
+        return sniffed
+    return guessed_from_name
+
+
+def _extract_disposition_filename(response: requests.Response) -> str:
+    disposition = response.headers.get("Content-Disposition", "")
+    match = re.search(r'filename\*?=(?:UTF-8\'\')?"?([^";]+)"?', disposition, flags=re.IGNORECASE)
+    if not match:
+        return ""
+    return match.group(1).strip()
+
+
+def _sniff_content_type(content: bytes, fallback: str) -> str:
+    stripped = content.lstrip()
+    if _looks_like_pdf(content):
+        return "application/pdf"
+    if content.startswith(b"PK\x03\x04"):
+        if fallback.endswith("macroEnabled.12"):
+            return "application/vnd.ms-excel.sheet.macroEnabled.12"
+        return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    if stripped.startswith((b"<!DOCTYPE html", b"<html", b"<HTML", b"<?xml")):
+        return "text/html"
+    return fallback
+
+
+def _looks_like_pdf(content: bytes) -> bool:
+    return content[:5] == b"%PDF-"
