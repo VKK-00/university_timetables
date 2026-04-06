@@ -109,6 +109,7 @@ class NormalizedRow:
     groups: str = ""
     course: str = ""
     notes: str = ""
+    week_source: str = "default"
     sheet_name: str = ""
     source_name: str = ""
     source_kind: str = ""
@@ -117,6 +118,8 @@ class NormalizedRow:
     source_url_or_path: str = ""
     confidence: float = 1.0
     warnings: list[str] = field(default_factory=list)
+    qa_flags: list[str] = field(default_factory=list)
+    qa_severity: str = "none"
     raw_excerpt: str = ""
     content_hash: str = ""
 
@@ -145,6 +148,24 @@ class SourceRunSummary:
 
 
 @dataclass(slots=True)
+class WorkbookQaSheetSummary:
+    sheet_name: str
+    row_count: int
+    issue_count: int
+    issues: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class WorkbookQaSummary:
+    file_path: Path
+    status: str
+    row_count: int
+    issue_count: int
+    issues: list[str] = field(default_factory=list)
+    sheets: list[WorkbookQaSheetSummary] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class PipelineOutput:
     exported_files: list[Path]
     manifest_path: Path
@@ -153,4 +174,9 @@ class PipelineOutput:
     review_rows: list[NormalizedRow]
     source_summary_path: Path | None = None
     source_report_path: Path | None = None
+    qa_report_json_path: Path | None = None
+    qa_report_xlsx_path: Path | None = None
+    qa_failures: int = 0
+    qa_warnings: int = 0
+    workbook_qa: list[WorkbookQaSummary] = field(default_factory=list)
     source_summaries: list[SourceRunSummary] = field(default_factory=list)

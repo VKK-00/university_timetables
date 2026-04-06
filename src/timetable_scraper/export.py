@@ -18,12 +18,15 @@ REVIEW_COLUMNS = [
     "sheet_name",
     "confidence",
     "warnings",
+    "qa_flags",
+    "qa_severity",
     "source_name",
     "source_kind",
     "source_root_url",
     "asset_locator",
     "raw_excerpt",
     "week_type",
+    "week_source",
     "day",
     "start_time",
     "end_time",
@@ -129,6 +132,7 @@ def _write_manifest(rows: Iterable[NormalizedRow], path: Path) -> None:
                         "faculty": row.faculty,
                         "sheet_name": row.sheet_name,
                         "week_type": row.week_type,
+                        "week_source": row.week_source,
                         "day": row.day,
                         "start_time": row.start_time,
                         "end_time": row.end_time,
@@ -147,6 +151,8 @@ def _write_manifest(rows: Iterable[NormalizedRow], path: Path) -> None:
                         "source_url_or_path": row.source_root_url,
                         "confidence": row.confidence,
                         "warnings": row.warnings,
+                        "qa_flags": row.qa_flags,
+                        "qa_severity": row.qa_severity,
                         "raw_excerpt": row.raw_excerpt,
                         "content_hash": row.content_hash,
                     }
@@ -173,12 +179,15 @@ def _write_review_queue(rows: list[NormalizedRow], path: Path, *, template_path:
             "sheet_name": row.sheet_name,
             "confidence": row.confidence,
             "warnings": ", ".join(row.warnings),
+            "qa_flags": ", ".join(row.qa_flags),
+            "qa_severity": row.qa_severity,
             "source_name": row.source_name,
             "source_kind": row.source_kind,
             "source_root_url": row.source_root_url,
             "asset_locator": row.asset_locator,
             "raw_excerpt": row.raw_excerpt,
             "week_type": row.week_type,
+            "week_source": row.week_source,
             "day": row.day,
             "start_time": row.start_time,
             "end_time": row.end_time,
@@ -193,7 +202,7 @@ def _write_review_queue(rows: list[NormalizedRow], path: Path, *, template_path:
         }
         for column, title in enumerate(REVIEW_COLUMNS, start=1):
             cell = sheet.cell(row_index, column)
-            cell.value = values.get(title, "")
+            _set_cell_value(cell, values.get(title, ""))
             _apply_cell_style(cell, style_pack.body_style)
         if style_pack.body_row_height is not None:
             sheet.row_dimensions[row_index].height = style_pack.body_row_height
@@ -230,7 +239,7 @@ def _write_body_row(sheet, row_index: int, row: NormalizedRow, style_pack: Templ
     ]
     for column, value in enumerate(values, start=1):
         cell = sheet.cell(row_index, column)
-        cell.value = value
+        _set_cell_value(cell, value)
         _apply_cell_style(cell, style_pack.body_style)
     if style_pack.body_row_height is not None:
         sheet.row_dimensions[row_index].height = style_pack.body_row_height
@@ -267,6 +276,12 @@ def _apply_cell_style(cell, style: CellStyleSnapshot) -> None:
     cell.number_format = style.number_format
 
 
+def _set_cell_value(cell, value) -> None:
+    cell.value = value
+    if isinstance(value, str) and value.startswith("="):
+        cell.data_type = "s"
+
+
 def _export_faculty_label(row: NormalizedRow) -> str:
     return coalesce_label(row.faculty, row.source_name, fallback="unknown faculty")
 
@@ -276,7 +291,7 @@ def _export_program_label(row: NormalizedRow) -> str:
 
 
 def _export_sheet_label(row: NormalizedRow) -> str:
-    return coalesce_label(row.sheet_name, row.course, row.program, fallback="Аркуш1")
+    return coalesce_label(row.sheet_name, row.course, row.program, row.source_name, fallback="Аркуш1")
 
 
 def _sort_key(row: NormalizedRow) -> tuple[int, str, str, str]:

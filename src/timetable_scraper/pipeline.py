@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from pathlib import Path
 
 import requests
 
@@ -10,7 +11,7 @@ from .export import export_rows
 from .fetch import fetch_asset
 from .models import AppConfig, PipelineOutput
 from .normalize import normalize_document
-from .qa import partition_rows
+from .qa import audit_exported_workbooks, partition_rows
 from .reporting import build_source_summaries, write_source_summaries
 
 
@@ -34,10 +35,15 @@ def run_pipeline(config: AppConfig) -> PipelineOutput:
             runtime_issues[asset.source_name].append(f"{exc.__class__.__name__}: {exc}")
 
     accepted, review = partition_rows(normalized_rows, threshold=config.confidence_threshold)
+    _prepare_output_dir(config.output_dir)
     exported_files, manifest_path, review_queue_path = export_rows(
         accepted,
         review,
         template_path=config.template_path,
+        output_dir=config.output_dir,
+    )
+    workbook_qa, qa_report_json_path, qa_report_xlsx_path = audit_exported_workbooks(
+        exported_files,
         output_dir=config.output_dir,
     )
     source_summaries = build_source_summaries(
@@ -57,8 +63,26 @@ def run_pipeline(config: AppConfig) -> PipelineOutput:
         review_rows=review,
         source_summary_path=source_summary_path,
         source_report_path=source_report_path,
+        qa_report_json_path=qa_report_json_path,
+        qa_report_xlsx_path=qa_report_xlsx_path,
+        qa_failures=sum(1 for item in workbook_qa if item.status == "fail"),
+        qa_warnings=sum(1 for item in workbook_qa if item.status == "warning"),
+        workbook_qa=workbook_qa,
         source_summaries=source_summaries,
     )
+
+
+def _prepare_output_dir(output_dir: Path) -> None:
+    if not output_dir.exists():
+        return
+    for path in sorted(output_dir.rglob("*"), reverse=True):
+        if path.is_file():
+            path.unlink()
+        elif path.is_dir():
+            try:
+                path.rmdir()
+            except OSError:
+                continue
 
 
 def inspect_config_source(config: AppConfig, source_name: str | None = None) -> str:

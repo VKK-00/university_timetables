@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -7,14 +8,23 @@ from typing import Any
 
 from .models import NormalizedRow, ParsedDocument, RawRecord
 from .utils import (
+    LINK_TEXT_RE,
+    ROOM_TEXT_RE,
+    TEACHER_TEXT_RE,
     clean_numeric_artifact,
     coalesce_label,
+    contains_link_text,
     flatten_multiline,
     humanize_source_name,
     infer_faculty_from_locator,
+    looks_like_garbage_text,
+    looks_like_room_text,
+    looks_like_service_text,
+    looks_like_teacher_text,
     normalize_day,
     normalize_header,
-    normalize_week_type,
+    normalize_service_tokens,
+    normalize_week_type_meta,
     parse_time_range,
     parse_time_value,
 )
@@ -63,6 +73,7 @@ INFORMATIONAL_NOTE_PATTERNS = (
 
 FILL_DOWN_FIELDS = ("week_type", "day", "start_time", "end_time")
 DEFAULT_SLOT_DURATION_MINUTES = 80
+SEGMENT_SPLIT_RE = re.compile(r"\s*(?:\||;|/)\s*")
 
 
 def map_headers(headers: list[Any]) -> dict[str, int]:
@@ -91,6 +102,7 @@ def records_from_tabular_rows(
             break
     if header_index is None:
         return [], [f"Could not detect header row in sheet '{sheet_name}'."]
+
     records: list[RawRecord] = []
     carry_values: dict[str, Any] = {}
     for row_number, row in enumerate(rows[header_index + 1 :], start=header_index + 2):
@@ -126,7 +138,7 @@ def normalize_document(document: ParsedDocument) -> list[NormalizedRow]:
 
 
 def normalize_record(record: RawRecord, *, document: ParsedDocument) -> NormalizedRow:
-    values = defaultdict(str, {key: flatten_multiline(value) for key, value in record.values.items()})
+    values = defaultdict(str, {key: normalize_service_tokens(value) for key, value in record.values.items()})
     source_asset = document.asset.asset
     source_name = source_asset.source_name
     source_root_url = source_asset.source_root_url or source_asset.source_url_or_path or source_asset.locator
@@ -154,41 +166,53 @@ def normalize_record(record: RawRecord, *, document: ParsedDocument) -> Normaliz
         subject_inferred = True
         record.warnings.append("subject_inferred_from_groups")
 
+    cleaned_fields = _cleanup_structured_fields(values)
+    week_type, week_source = normalize_week_type_meta(
+        values["week_type"],
+        cleaned_fields["subject"],
+        cleaned_fields["notes"],
+        record.raw_excerpt,
+    )
+
     start_time = parse_time_value(values["start_time"])
     end_time = parse_time_value(values["end_time"])
     if (not start_time or not end_time) and values["raw_time"]:
         start_time, end_time = parse_time_range(values["raw_time"])
-    start_time, end_time = _infer_missing_time_bounds(start_time, end_time, values)
+    start_time, end_time = _infer_missing_time_bounds(start_time, end_time, cleaned_fields)
 
-    warnings = list(record.warnings)
-    if not values["day"]:
+    warnings = list(dict.fromkeys(record.warnings))
+    if not cleaned_fields["day"]:
         warnings.append("missing_day")
     if not start_time:
         warnings.append("missing_start_time")
     if not end_time:
         warnings.append("missing_end_time")
-    if not values["subject"]:
+    if not cleaned_fields["subject"]:
         warnings.append("missing_subject")
     elif subject_inferred:
         warnings = [warning for warning in warnings if warning != "missing_subject"]
+    if cleaned_fields["subject"] and looks_like_service_text(cleaned_fields["subject"]):
+        warnings.append("service_text_subject")
+    if cleaned_fields["subject"] and looks_like_garbage_text(cleaned_fields["subject"]):
+        warnings.append("garbage_text_subject")
 
     confidence = score_record(
-        has_day=bool(values["day"]),
+        has_day=bool(cleaned_fields["day"]),
         has_start=bool(start_time),
         has_end=bool(end_time),
-        has_subject=bool(values["subject"]),
+        has_subject=bool(cleaned_fields["subject"]),
         warning_count=len(warnings),
     )
 
     faculty = coalesce_label(
-        values["faculty"],
+        cleaned_fields["faculty"],
         infer_faculty_from_locator(source_root_url),
         source_label,
         fallback="Невідомий факультет",
     )
     display_stem = Path(flatten_multiline(source_asset.display_name) or source_label).stem
     program = coalesce_label(
-        values["program"],
+        cleaned_fields["program"],
         record.sheet_name,
         display_stem,
         source_label,
@@ -198,18 +222,19 @@ def normalize_record(record: RawRecord, *, document: ParsedDocument) -> Normaliz
     return NormalizedRow(
         program=program,
         faculty=faculty,
-        week_type=normalize_week_type(values["week_type"]),
-        day=normalize_day(values["day"]),
+        week_type=week_type,
+        day=normalize_day(cleaned_fields["day"]),
         start_time=start_time,
         end_time=end_time,
-        subject=flatten_multiline(values["subject"]),
-        teacher=flatten_multiline(values["teacher"]),
-        lesson_type=flatten_multiline(values["lesson_type"]),
-        link=flatten_multiline(values["link"]),
-        room=flatten_multiline(values["room"]),
-        groups=clean_numeric_artifact(values["groups"]),
-        course=clean_numeric_artifact(values["course"]),
-        notes=flatten_multiline(values["notes"]),
+        subject=cleaned_fields["subject"],
+        teacher=cleaned_fields["teacher"],
+        lesson_type=cleaned_fields["lesson_type"],
+        link=cleaned_fields["link"],
+        room=cleaned_fields["room"],
+        groups=clean_numeric_artifact(cleaned_fields["groups"]),
+        course=clean_numeric_artifact(cleaned_fields["course"]),
+        notes=cleaned_fields["notes"],
+        week_source=week_source,
         sheet_name=record.sheet_name,
         source_name=source_name,
         source_kind=source_asset.source_kind,
@@ -268,10 +293,7 @@ def _has_schedule_payload(values: dict[str, Any]) -> bool:
 
 
 def _has_class_payload(values: dict[str, Any]) -> bool:
-    return any(
-        flatten_multiline(values.get(field))
-        for field in ("subject", "teacher", "lesson_type", "link", "room", "groups")
-    )
+    return any(flatten_multiline(values.get(field)) for field in ("subject", "teacher", "lesson_type", "link", "room", "groups"))
 
 
 def _is_repeated_header_row(row: list[Any]) -> bool:
@@ -336,3 +358,123 @@ def _shift_time(time_value: str, minutes: int) -> str:
     parsed = datetime.strptime(time_value, "%H:%M")
     shifted = parsed + timedelta(minutes=minutes)
     return shifted.strftime("%H:%M")
+
+
+def _cleanup_structured_fields(values: dict[str, str]) -> dict[str, str]:
+    subject_text, subject_teachers, subject_rooms, subject_links, subject_notes = _cleanup_subject(values["subject"])
+    teacher_text, teacher_rooms, teacher_links, teacher_notes = _cleanup_aux_field(values["teacher"], keep="teacher")
+    room_text, room_teachers, room_links, room_notes = _cleanup_aux_field(values["room"], keep="room")
+    link_text = _merge_unique([values["link"], *subject_links, *teacher_links, *room_links, *_extract_links(values["notes"])], separator=" ")
+    notes_text = _merge_unique(
+        [
+            *_split_free_notes(values["notes"]),
+            *subject_notes,
+            *teacher_notes,
+            *room_notes,
+        ]
+    )
+    return {
+        "program": normalize_service_tokens(values["program"]),
+        "faculty": normalize_service_tokens(values["faculty"]),
+        "day": values["day"],
+        "subject": subject_text,
+        "teacher": _merge_unique([teacher_text, *subject_teachers, *room_teachers]),
+        "lesson_type": normalize_service_tokens(values["lesson_type"]),
+        "link": link_text,
+        "room": _merge_unique([room_text, *subject_rooms, *teacher_rooms]),
+        "groups": normalize_service_tokens(values["groups"]),
+        "course": normalize_service_tokens(values["course"]),
+        "notes": notes_text,
+    }
+
+
+def _cleanup_subject(text: str) -> tuple[str, list[str], list[str], list[str], list[str]]:
+    if not text:
+        return "", [], [], [], []
+    subject_parts: list[str] = []
+    teacher_parts: list[str] = []
+    room_parts: list[str] = []
+    link_parts: list[str] = []
+    note_parts: list[str] = []
+    for segment in _split_segments(text):
+        residual, teachers, rooms, links = _extract_entities(segment)
+        teacher_parts.extend(teachers)
+        room_parts.extend(rooms)
+        link_parts.extend(links)
+        if not residual:
+            continue
+        if looks_like_service_text(residual):
+            note_parts.append(residual)
+            continue
+        subject_parts.append(residual)
+    return _merge_unique(subject_parts, separator=" / "), teacher_parts, room_parts, link_parts, note_parts
+
+
+def _cleanup_aux_field(text: str, *, keep: str) -> tuple[str, list[str], list[str], list[str]]:
+    if not text:
+        return "", [], [], []
+    residual, teachers, rooms, links = _extract_entities(text)
+    notes: list[str] = []
+    if keep == "teacher":
+        teacher_value = _merge_unique([*teachers, residual] if residual and not looks_like_room_text(residual) else teachers)
+        return teacher_value, rooms, links, notes
+    room_value = _merge_unique([*rooms, residual] if residual and not looks_like_teacher_text(residual) else rooms)
+    return room_value, teachers, links, notes
+
+
+def _extract_entities(text: str) -> tuple[str, list[str], list[str], list[str]]:
+    cleaned = normalize_service_tokens(text)
+    links = _extract_links(cleaned)
+    if links:
+        cleaned = LINK_TEXT_RE.sub(" ", cleaned)
+
+    rooms = [normalize_service_tokens(match.group(0)) for match in ROOM_TEXT_RE.finditer(cleaned)]
+    if rooms:
+        cleaned = ROOM_TEXT_RE.sub(" ", cleaned)
+
+    teachers = [normalize_service_tokens(match.group(0)) for match in TEACHER_TEXT_RE.finditer(cleaned)]
+    if teachers:
+        cleaned = TEACHER_TEXT_RE.sub(" ", cleaned)
+
+    residual = normalize_service_tokens(cleaned).strip(" -/,;")
+    if residual and not any(character.isalnum() for character in residual):
+        residual = ""
+    if looks_like_garbage_text(residual):
+        residual = ""
+    return residual, _unique_list(teachers), _unique_list(rooms), _unique_list(links)
+
+
+def _extract_links(text: str) -> list[str]:
+    return _unique_list(match.group(0) for match in LINK_TEXT_RE.finditer(normalize_service_tokens(text)))
+
+
+def _split_free_notes(text: str) -> list[str]:
+    if not text:
+        return []
+    notes = [segment for segment in _split_segments(text) if segment and not contains_link_text(segment)]
+    return _unique_list(notes)
+
+
+def _split_segments(text: str) -> list[str]:
+    if not text:
+        return []
+    if "/" not in text and "|" not in text and ";" not in text:
+        return [normalize_service_tokens(text)]
+    segments = [normalize_service_tokens(part) for part in SEGMENT_SPLIT_RE.split(text) if normalize_service_tokens(part)]
+    return segments or [normalize_service_tokens(text)]
+
+
+def _merge_unique(values: list[str], *, separator: str = "; ") -> str:
+    return separator.join(_unique_list(values))
+
+
+def _unique_list(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        cleaned = normalize_service_tokens(value)
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        result.append(cleaned)
+    return result

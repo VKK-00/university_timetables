@@ -58,6 +58,8 @@ def test_normalize_record_marks_low_confidence_row() -> None:
     row = normalize_record(record, document=ParsedDocument(asset=fetched, sheets=[]))
     assert row.confidence < 0.74
     assert "missing_day" in row.warnings
+    assert row.week_type == "Обидва"
+    assert row.week_source == "default"
 
 
 def test_records_from_tabular_rows_skip_link_only_rows() -> None:
@@ -204,7 +206,7 @@ def test_records_from_tabular_rows_skip_structural_and_informational_rows() -> N
     assert records[0].values["subject"] == "Мікроекономіка"
 
 
-def test_partition_rows_accepts_non_class_marker_without_time_slots() -> None:
+def test_partition_rows_routes_non_class_marker_without_time_slots_to_review() -> None:
     rows = [
         NormalizedRow(
             program="Demo",
@@ -220,5 +222,104 @@ def test_partition_rows_accepts_non_class_marker_without_time_slots() -> None:
         )
     ]
     accepted, review = partition_rows(rows, threshold=0.74)
-    assert len(accepted) == 1
-    assert not review
+    assert not accepted
+    assert len(review) == 1
+    assert "missing_time" in review[0].qa_flags
+
+
+def test_normalize_record_extracts_teacher_and_room_from_composite_subject() -> None:
+    asset = DiscoveredAsset(
+        source_name="fixture",
+        source_kind="zip",
+        source_url_or_path="fixtures.zip",
+        asset_kind="zip_entry",
+        locator="fixtures.zip::demo.xlsx",
+        display_name="demo.xlsx",
+    )
+    fetched = FetchedAsset(asset=asset, content=b"", content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", content_hash="abc", resolved_locator="demo.xlsx")
+    record = RawRecord(
+        values={
+            "program": "Demo",
+            "faculty": "Law",
+            "day": "Понеділок",
+            "start_time": "09:30",
+            "end_time": "10:50",
+            "subject": "Конституційне право (с) / PhD, ас. Ольшевський І.П. / ауд. 159",
+        },
+        row_index=5,
+        sheet_name="1 курс",
+        raw_excerpt="Конституційне право",
+    )
+    row = normalize_record(record, document=ParsedDocument(asset=fetched, sheets=[]))
+    assert row.subject == "Конституційне право (с)"
+    assert "Ольшевський" in row.teacher
+    assert row.room == "ауд. 159"
+
+
+def test_partition_rows_marks_contaminated_subject_for_review() -> None:
+    row = NormalizedRow(
+        program="Demo",
+        faculty="Law",
+        week_type="Обидва",
+        day="Понеділок",
+        start_time="09:30",
+        end_time="10:50",
+        subject="Конституційне право / ауд. 159",
+        confidence=0.98,
+    )
+    accepted, review = partition_rows([row], threshold=0.74)
+    assert not accepted
+    assert len(review) == 1
+    assert "subject_contains_room" in review[0].qa_flags
+
+
+def test_partition_rows_marks_numeric_subject_for_review() -> None:
+    row = NormalizedRow(
+        program="Demo",
+        faculty="Geo",
+        week_type="Обидва",
+        day="Понеділок",
+        start_time="09:30",
+        end_time="10:50",
+        subject="313",
+        confidence=0.98,
+    )
+    accepted, review = partition_rows([row], threshold=0.74)
+    assert not accepted
+    assert len(review) == 1
+    assert "garbage_text" in review[0].qa_flags
+
+
+def test_partition_rows_marks_meeting_code_subject_for_review() -> None:
+    row = NormalizedRow(
+        program="Demo",
+        faculty="Geo",
+        week_type="Обидва",
+        day="Понеділок",
+        start_time="09:30",
+        end_time="10:50",
+        subject="Meeting ID: 871 2397 5892",
+        confidence=0.98,
+    )
+    accepted, review = partition_rows([row], threshold=0.74)
+    assert not accepted
+    assert len(review) == 1
+    assert "garbage_text" in review[0].qa_flags
+
+
+def test_partition_rows_marks_long_mixed_subject_for_review() -> None:
+    row = NormalizedRow(
+        program="Demo",
+        faculty="Psy",
+        week_type="Обидва",
+        day="Середа",
+        start_time="10:00",
+        end_time="11:20",
+        subject="Дизайн психологічного дослідження ----- Дизайн психологічного дослідження (сем.) . 122",
+        teacher="доц ; Москаленко А.М. ; лек.....",
+        confidence=0.98,
+    )
+    accepted, review = partition_rows([row], threshold=0.74)
+    assert not accepted
+    assert len(review) == 1
+    assert "inconsistent_columns" in review[0].qa_flags

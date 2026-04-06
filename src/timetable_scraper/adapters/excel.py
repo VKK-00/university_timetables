@@ -194,8 +194,11 @@ def _parse_fit_grid_schedule_sheet(worksheet: Worksheet, *, faculty: str) -> tup
         return [], [f"Could not detect FIT-style schedule slots in sheet '{worksheet.title}'."]
     records: list[RawRecord] = []
     warnings: list[str] = []
+    current_day = ""
     for slot_start in slot_starts:
-        day = normalize_day(_expanded_value(worksheet, slot_start, 1, merged_lookup))
+        day = normalize_day(_expanded_value(worksheet, slot_start, 1, merged_lookup)) or current_day
+        if day:
+            current_day = day
         time_text = _expanded_value(worksheet, slot_start, 2, merged_lookup)
         start_time, end_time = parse_time_range(time_text)
         if not start_time or not end_time:

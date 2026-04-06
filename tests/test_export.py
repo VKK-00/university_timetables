@@ -96,3 +96,24 @@ def test_manifest_serializes_provenance_fields(tmp_path: Path) -> None:
     assert payload["source_name"] == "demo-source"
     assert payload["source_root_url"] == "https://example.edu/schedule"
     assert payload["asset_locator"] == "https://docs.google.com/spreadsheets/d/demo/edit"
+
+
+def test_export_rows_preserve_literal_text_that_starts_with_equals(tmp_path: Path) -> None:
+    template_path = next(Path(".").glob("*.xlsx")).resolve()
+    rows = [
+        NormalizedRow(
+            program="Demo Program",
+            faculty="Demo Faculty",
+            week_type="Обидва",
+            day="Понеділок",
+            start_time="08:00",
+            end_time="09:20",
+            subject="=encoded-token",
+            sheet_name="1 курс",
+        )
+    ]
+    exported_files, _, _ = export_rows(rows, [], template_path=template_path, output_dir=tmp_path / "out")
+    workbook = load_workbook(exported_files[0], data_only=False)
+    sheet = workbook.active
+    assert sheet["E3"].value == "=encoded-token"
+    assert sheet["E3"].data_type == "s"

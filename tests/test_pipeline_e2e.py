@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import requests
+import pytest
 from openpyxl import load_workbook
 
 from timetable_scraper.config import load_config
@@ -13,6 +14,8 @@ from timetable_scraper.pipeline import run_pipeline
 def test_pipeline_runs_against_real_archive(tmp_path: Path) -> None:
     config_path = Path("config/sources.yaml").resolve()
     config = load_config(config_path)
+    if any(source.path and not source.path.exists() for source in config.sources):
+        pytest.skip("Real archive fixture is not available in the working tree")
     config.output_dir = tmp_path / "out"
     config.cache_dir = tmp_path / "cache"
     result = run_pipeline(config)
@@ -96,3 +99,39 @@ def test_pipeline_skips_unavailable_assets(monkeypatch, tmp_path: Path) -> None:
     assert len(result.rows) == 1
     assert not result.review_rows
     assert result.exported_files
+    assert result.qa_failures == 1
+
+
+def test_pipeline_cleans_previous_output_dir(tmp_path: Path, monkeypatch) -> None:
+    config = AppConfig(
+        template_path=Path("Шаблон.xlsx").resolve(),
+        output_dir=tmp_path / "out",
+        cache_dir=tmp_path / "cache",
+        confidence_threshold=0.74,
+        ocr_enabled=False,
+        sources=[],
+    )
+    stale_file = config.output_dir / "stale.txt"
+    stale_file.parent.mkdir(parents=True, exist_ok=True)
+    stale_file.write_text("old", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "timetable_scraper.pipeline.discover_sources",
+        lambda sources, session: DiscoveryResult(assets=[], issues=[]),
+    )
+    monkeypatch.setattr(
+        "timetable_scraper.pipeline.export_rows",
+        lambda rows, review_rows, *, template_path, output_dir: ([], output_dir / "manifest.jsonl", output_dir / "review_queue.xlsx"),
+    )
+    monkeypatch.setattr(
+        "timetable_scraper.pipeline.audit_exported_workbooks",
+        lambda exported_files, output_dir: ([], output_dir / "qa_report.json", output_dir / "qa_report.xlsx"),
+    )
+    monkeypatch.setattr(
+        "timetable_scraper.pipeline.write_source_summaries",
+        lambda summaries, *, output_dir: (output_dir / "source_summary.json", output_dir / "source_summary.md"),
+    )
+
+    run_pipeline(config)
+
+    assert not stale_file.exists()

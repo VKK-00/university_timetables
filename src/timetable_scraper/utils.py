@@ -23,6 +23,17 @@ WEEK_TYPES = {
     "через тиждень": "Через тиждень",
 }
 
+WEEK_TYPE_PATTERNS = (
+    (re.compile(r"(?iu)\b(?:верх(?:ній|нiй)|по\s+верхньому|верхнім?\s+тиж)"), "Верхній"),
+    (re.compile(r"(?iu)\b(?:ниж(?:ній|нiй)|по\s+нижньому|нижнім?\s+тиж)"), "Нижній"),
+    (re.compile(r"(?iu)\b(?:i|1)\s*тиж"), "Верхній"),
+    (re.compile(r"(?iu)\b(?:ii|2)\s*тиж"), "Нижній"),
+    (re.compile(r"(?iu)\bнепар"), "Верхній"),
+    (re.compile(r"(?iu)\bпарн"), "Нижній"),
+    (re.compile(r"(?iu)\bч/т\b"), "Через тиждень"),
+    (re.compile(r"(?iu)\bчерез\s+тиждень\b"), "Через тиждень"),
+)
+
 DAY_NAMES = {
     "понеділок": "Понеділок",
     "вівторок": "Вівторок",
@@ -40,6 +51,40 @@ TIME_RANGE_RE = re.compile(
 )
 STORAGE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{16,}$")
 NUMERIC_TOKEN_RE = re.compile(r"^\d+(?:[._-]\d+)*$")
+LINK_TEXT_RE = re.compile(r"(?iu)(https?://\S+|(?:zoom|teams|meet)(?:[\w./:@?=#&%-]+)?)")
+ROOM_TEXT_RE = re.compile(
+    r"(?iu)\b(?:ауд\.?\s*[\w./-]+|аудитор(?:ія|iя)\s*[\w./-]+|каб\.?\s*[\w./-]+|корп(?:ус|\.)?\s*[\w./-]+|online|онлайн)\b"
+)
+TEACHER_TEXT_RE = re.compile(
+    r"(?iu)(?:\b(?:проф|доц|ас|викл|ст\.?\s*викл|phd|к\.\s*[юф]\.\s*н|д\.\s*[юф]\.\s*н)\.?\b|[А-ЯІЇЄҐ][а-яіїєґ'-]+\s*[А-ЯІЇЄҐ]\.\s*[А-ЯІЇЄҐ]\.)"
+)
+SERVICE_TEXT_PATTERNS = (
+    "розклад занять",
+    "графік",
+    "списки груп",
+    "теоретичне навчання",
+    "інформаційний проспект",
+    "правила прийому",
+    "наукові керівники",
+    "програма розвитку",
+    "звіт декана",
+    "meeting id",
+    "passcode",
+    "код доступу",
+    "ідентифікатор конференції",
+)
+TECHNICAL_LABEL_PATTERNS = (
+    re.compile(r"(?iu)^pdf(?:-table.*)?$"),
+    re.compile(r"(?iu)^table-\d+$"),
+    re.compile(r"(?iu)^page$"),
+    re.compile(r"(?iu)^sheet\d+$"),
+    re.compile(r"(?iu)^аркуш\d+$"),
+    re.compile(r"(?iu)^переглянути$"),
+    re.compile(r"(?iu)^лист\d*$"),
+    re.compile(r"(?iu)^нач[іi]тка$"),
+    re.compile(r"(?iu)^листопад\s*-\s*грудень$"),
+    re.compile(r"(?iu)^пост[іїi]+н[иi]+!*?$"),
+)
 KNOWN_SOURCE_LABELS = {
     "fit.knu.ua": "Факультет інформаційних технологій",
     "phys.knu.ua": "Фізичний факультет",
@@ -127,6 +172,20 @@ def normalize_week_type(value: Any) -> str:
     return WEEK_TYPES.get(text, flatten_multiline(value))
 
 
+def normalize_week_type_meta(value: Any, *contexts: Any) -> tuple[str, str]:
+    explicit = normalize_week_type(value)
+    if explicit:
+        return explicit, "explicit"
+    for context in contexts:
+        text = flatten_multiline(context)
+        if not text:
+            continue
+        for pattern, canonical in WEEK_TYPE_PATTERNS:
+            if pattern.search(text):
+                return canonical, "inferred"
+    return "Обидва", "default"
+
+
 def normalize_day(value: Any) -> str:
     text = flatten_multiline(value).casefold()
     if text in DAY_NAMES:
@@ -167,6 +226,13 @@ def looks_like_storage_identifier(value: Any) -> bool:
     return False
 
 
+def looks_like_technical_label(value: Any) -> bool:
+    text = flatten_multiline(value)
+    if not text:
+        return False
+    return any(pattern.search(text) for pattern in TECHNICAL_LABEL_PATTERNS)
+
+
 def is_meaningful_label(value: Any) -> bool:
     text = flatten_multiline(value)
     lowered = text.casefold()
@@ -175,6 +241,8 @@ def is_meaningful_label(value: Any) -> bool:
     if lowered in {"невідома програма", "невідомий факультет", "sheet1", "аркуш1", "demo"}:
         return False
     if looks_like_storage_identifier(text):
+        return False
+    if looks_like_technical_label(text):
         return False
     return True
 
@@ -214,6 +282,55 @@ def clean_numeric_artifact(value: Any) -> str:
     return text
 
 
+def normalize_service_tokens(value: Any) -> str:
+    text = flatten_multiline(value)
+    if not text:
+        return ""
+    text = text.replace("ауд ", "ауд. ").replace("АУД ", "ауд. ")
+    text = re.sub(r"(?iu)\bлек\b", "лек.", text)
+    text = re.sub(r"(?iu)\bпракт\b", "практ.", text)
+    text = re.sub(r"\s*([|/;])\s*", r" \1 ", text)
+    text = re.sub(r"\s+", " ", text).strip(" ,;")
+    return text
+
+
+def contains_link_text(value: Any) -> bool:
+    return bool(LINK_TEXT_RE.search(flatten_multiline(value)))
+
+
+def looks_like_room_text(value: Any) -> bool:
+    return bool(ROOM_TEXT_RE.search(flatten_multiline(value)))
+
+
+def looks_like_teacher_text(value: Any) -> bool:
+    return bool(TEACHER_TEXT_RE.search(flatten_multiline(value)))
+
+
+def looks_like_service_text(value: Any) -> bool:
+    text = flatten_multiline(value).casefold()
+    return bool(text) and any(pattern in text for pattern in SERVICE_TEXT_PATTERNS)
+
+
+def looks_like_garbage_text(value: Any) -> bool:
+    text = flatten_multiline(value)
+    if not text:
+        return False
+    tokens = text.split()
+    if len(text) > 220:
+        return True
+    if tokens:
+        short_ratio = sum(1 for token in tokens if len(re.sub(r"[^\w]", "", token, flags=re.UNICODE)) <= 1) / len(tokens)
+        if len(tokens) >= 8 and short_ratio >= 0.45:
+            return True
+    symbol_ratio = sum(1 for character in text if character in "/|[]{}_=+") / max(len(text), 1)
+    if len(text) >= 80 and symbol_ratio >= 0.18:
+        return True
+    compact = re.sub(r"[\W_]+", "", text, flags=re.UNICODE)
+    if compact and len(compact) >= 60 and len(set(compact.casefold())) <= 8:
+        return True
+    return False
+
+
 def excerpt_from_values(values: dict[str, Any], limit: int = 6) -> str:
     parts = [flatten_multiline(v) for v in values.values() if flatten_multiline(v)]
     return " | ".join(parts[:limit])
@@ -242,4 +359,6 @@ def infer_faculty_from_locator(locator: str) -> str:
 
 def truncate_sheet_title(value: str) -> str:
     text = flatten_multiline(value) or "Аркуш1"
+    text = re.sub(r"[:\\/?*\[\]]+", " ", text)
+    text = normalize_whitespace(text)
     return text[:31]
