@@ -28,6 +28,8 @@ HARD_FAIL_FLAGS = {
     "subject_contains_room",
     "subject_contains_teacher",
     "subject_contains_link",
+    "subject_too_long",
+    "teacher_too_long",
     "garbage_text",
     "inconsistent_columns",
 }
@@ -126,7 +128,7 @@ def _audit_single_workbook(path: Path) -> WorkbookQaSummary:
     total_rows = 0
 
     technical_name = coalesce_label(path.stem, fallback="")
-    if not technical_name or looks_like_technical_label(path.stem) or looks_like_service_text(path.stem):
+    if not technical_name or looks_like_technical_label(path.stem):
         workbook_issues.append("technical_file_name")
 
     for sheet in workbook.worksheets:
@@ -160,11 +162,7 @@ def _audit_single_workbook(path: Path) -> WorkbookQaSummary:
                 issue_counter["teacher_too_long"] += 1
         if row_count == 0:
             issue_counter["empty_sheet"] += 1
-        elif row_count <= 2 and (
-            looks_like_technical_label(path.stem)
-            or looks_like_service_text(path.stem)
-            or non_class_rows == row_count
-        ):
+        elif row_count == 1 and looks_like_technical_label(path.stem):
             issue_counter["suspicious_small_sheet"] += 1
 
         total_rows += row_count

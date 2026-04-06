@@ -80,10 +80,6 @@ TECHNICAL_LABEL_PATTERNS = (
     re.compile(r"(?iu)^sheet\d+$"),
     re.compile(r"(?iu)^аркуш\d+$"),
     re.compile(r"(?iu)^переглянути$"),
-    re.compile(r"(?iu)^лист\d*$"),
-    re.compile(r"(?iu)^нач[іi]тка$"),
-    re.compile(r"(?iu)^листопад\s*-\s*грудень$"),
-    re.compile(r"(?iu)^пост[іїi]+н[иi]+!*?$"),
 )
 KNOWN_SOURCE_LABELS = {
     "fit.knu.ua": "Факультет інформаційних технологій",
