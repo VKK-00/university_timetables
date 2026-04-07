@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import re
 import zipfile
 from pathlib import Path
@@ -328,7 +327,7 @@ def _discover_dropfiles_assets(
     seen_categories: set[str] = set()
     base_url = f"{urlparse(page_url).scheme}://{urlparse(page_url).netloc}"
     for container in soup.select(".dropfiles-content[data-category]"):
-        top_category = container.get("data-category")
+        top_category = flatten_multiline(container.get("data-category"))
         if not top_category:
             continue
         category_links = container.select(".dropfilescategory.catlink[data-idcat]")
@@ -345,7 +344,7 @@ def _discover_dropfiles_assets(
                 page_url=page_url,
                 top_category=top_category,
                 category_id=category_id,
-                category_label=flatten_multiline(link.get_text(" ", strip=True)) or link.get("title") or category_id,
+                category_label=flatten_multiline(link.get_text(" ", strip=True)) or flatten_multiline(link.get("title")) or category_id,
                 visited=set(),
             )
             assets.extend(category_assets)
@@ -442,12 +441,12 @@ def _discover_dropfiles_category(
 def _extract_link_candidates(soup: BeautifulSoup, html: str, *, page_url: str) -> list[tuple[str, str]]:
     candidates: list[tuple[str, str]] = []
     for tag in soup.find_all(["a", "iframe", "embed", "source"]):
-        href = tag.get("href") or tag.get("src") or tag.get("data-src") or tag.get("data-href")
+        href = flatten_multiline(tag.get("href") or tag.get("src") or tag.get("data-src") or tag.get("data-href"))
         if not href:
             continue
         resolved = _normalize_candidate_url(urljoin(page_url, href))
         if resolved:
-            label = flatten_multiline(tag.get_text(" ", strip=True)) or tag.get("title") or resolved
+            label = flatten_multiline(tag.get_text(" ", strip=True)) or flatten_multiline(tag.get("title")) or resolved
             candidates.append((resolved, label))
 
     for match in ABSOLUTE_URL_RE.findall(html):

@@ -19,6 +19,13 @@ def _resolve_path(base_dir: Path, raw: str | None) -> Path | None:
     return path
 
 
+def _resolve_required_path(base_dir: Path, raw: str | None, *, field_name: str) -> Path:
+    path = _resolve_path(base_dir, raw)
+    if path is None:
+        raise ValueError(f"Config field '{field_name}' is required")
+    return path
+
+
 def load_config(config_path: str | Path) -> AppConfig:
     config_path = Path(config_path).resolve()
     data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
@@ -37,9 +44,9 @@ def load_config(config_path: str | Path) -> AppConfig:
         for index, item in enumerate(data.get("sources", []), start=1)
     ]
     return AppConfig(
-        template_path=_resolve_path(base_dir, data["template_path"]),
-        output_dir=_resolve_path(base_dir, data.get("output_dir", "out")),
-        cache_dir=_resolve_path(base_dir, data.get("cache_dir", ".cache/timetable_scraper")),
+        template_path=_resolve_required_path(base_dir, data.get("template_path"), field_name="template_path"),
+        output_dir=_resolve_required_path(base_dir, data.get("output_dir", "out"), field_name="output_dir"),
+        cache_dir=_resolve_required_path(base_dir, data.get("cache_dir", ".cache/timetable_scraper"), field_name="cache_dir"),
         confidence_threshold=float(data.get("confidence_threshold", 0.74)),
         ocr_enabled=bool(data.get("ocr_enabled", True)),
         sources=sources,

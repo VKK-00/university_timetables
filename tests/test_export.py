@@ -5,7 +5,7 @@ import json
 
 from openpyxl import load_workbook
 
-from timetable_scraper.export import export_rows
+from timetable_scraper.export import export_rows, write_autofix_report
 from timetable_scraper.models import NormalizedRow
 
 
@@ -89,6 +89,7 @@ def test_manifest_serializes_provenance_fields(tmp_path: Path) -> None:
             source_kind="web_page",
             source_root_url="https://example.edu/schedule",
             asset_locator="https://docs.google.com/spreadsheets/d/demo/edit",
+            autofix_actions=["week_type_defaulted", "subject_cleaned"],
         )
     ]
     _, manifest_path, _ = export_rows(rows, [], template_path=template_path, output_dir=tmp_path / "out")
@@ -96,6 +97,7 @@ def test_manifest_serializes_provenance_fields(tmp_path: Path) -> None:
     assert payload["source_name"] == "demo-source"
     assert payload["source_root_url"] == "https://example.edu/schedule"
     assert payload["asset_locator"] == "https://docs.google.com/spreadsheets/d/demo/edit"
+    assert payload["autofix_actions"] == ["week_type_defaulted", "subject_cleaned"]
 
 
 def test_export_rows_preserve_literal_text_that_starts_with_equals(tmp_path: Path) -> None:
@@ -117,3 +119,36 @@ def test_export_rows_preserve_literal_text_that_starts_with_equals(tmp_path: Pat
     sheet = workbook.active
     assert sheet["E3"].value == "=encoded-token"
     assert sheet["E3"].data_type == "s"
+
+
+def test_write_autofix_report_creates_summary_and_row_sheets(tmp_path: Path) -> None:
+    rows = [
+        NormalizedRow(
+            program="Demo Program",
+            faculty="Demo Faculty",
+            week_type="ÐžÐ±Ð¸Ð´Ð²Ð°",
+            day="ÐŸÐ¾Ð½ÐµÐ´Ñ–Ð»Ð¾Ðº",
+            start_time="08:00",
+            end_time="09:20",
+            subject="ÐŸÑ€ÐµÐ´Ð¼ÐµÑ‚",
+            source_name="demo-source",
+            source_root_url="https://example.edu/schedule",
+            asset_locator="https://example.edu/file.xlsx",
+            autofix_actions=["week_type_defaulted", "room_from_subject"],
+            warnings=["subject_inferred_from_notes"],
+        )
+    ]
+
+    json_path, xlsx_path, autofix_rows = write_autofix_report(rows, output_dir=tmp_path / "out")
+
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+    assert payload["rows_with_autofix"] == 1
+    assert payload["action_counts"]["week_type_defaulted"] == 1
+    assert payload["action_counts"]["room_from_subject"] == 1
+    assert payload["rows"][0]["autofix_actions"] == ["week_type_defaulted", "room_from_subject"]
+
+    workbook = load_workbook(xlsx_path)
+    assert workbook.sheetnames == ["summary", "rows"]
+    assert workbook["summary"]["A2"].value == "room_from_subject"
+    assert workbook["rows"]["I2"].value == "week_type_defaulted, room_from_subject"
+    assert autofix_rows == 1

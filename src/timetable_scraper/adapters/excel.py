@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass
 from io import BytesIO, StringIO
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import xlrd
 from openpyxl import load_workbook
@@ -159,7 +159,7 @@ def _parse_csv_asset(fetched_asset: FetchedAsset) -> ParsedDocument:
     )
 
 
-def _extract_program_title(rows: list[list[object]], fallback: str) -> str:
+def _extract_program_title(rows: list[list[Any]], fallback: str) -> str:
     for row in rows[:3]:
         values = [flatten_multiline(cell) for cell in row if flatten_multiline(cell)]
         if len(values) == 1:
@@ -767,7 +767,11 @@ def _build_generic_header_context(
         group_values = [value for value in values if GENERIC_GROUP_RE.search(normalize_header(value))]
         course_map[column] = "; ".join(_unique_list(course_values))
         group_map[column] = "; ".join(_unique_list(group_values))
-    return {"headers": header_map, "course": course_map, "group": group_map}
+    return {
+        "headers": cast(dict[int, list[str] | str], header_map),
+        "course": cast(dict[int, list[str] | str], course_map),
+        "group": cast(dict[int, list[str] | str], group_map),
+    }
 
 
 def _find_generic_day(subject_cell: GridCell, day_cells: list[GridCell], *, schedule_min_col: int) -> str:

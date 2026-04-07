@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from copy import copy
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +18,7 @@ REVIEW_COLUMNS = [
     "sheet_name",
     "confidence",
     "warnings",
+    "autofix_actions",
     "qa_flags",
     "qa_severity",
     "source_name",
@@ -91,6 +92,19 @@ def export_rows(
     return exported_files, manifest_path, review_queue_path
 
 
+def write_autofix_report(rows: list[NormalizedRow], *, output_dir: Path) -> tuple[Path, Path, int]:
+    autofixed_rows = [row for row in rows if row.autofix_actions]
+    action_counts: Counter[str] = Counter()
+    for row in autofixed_rows:
+        action_counts.update(row.autofix_actions)
+
+    json_path = output_dir / "autofix_report.json"
+    xlsx_path = output_dir / "autofix_report.xlsx"
+    _write_autofix_report_json(autofixed_rows, action_counts, json_path)
+    _write_autofix_report_xlsx(autofixed_rows, action_counts, xlsx_path)
+    return json_path, xlsx_path, len(autofixed_rows)
+
+
 def _export_program_workbooks(rows: list[NormalizedRow], *, template_path: Path, output_dir: Path) -> list[Path]:
     grouped: dict[tuple[str, str], list[NormalizedRow]] = defaultdict(list)
     for row in rows:
@@ -151,6 +165,7 @@ def _write_manifest(rows: Iterable[NormalizedRow], path: Path) -> None:
                         "source_url_or_path": row.source_root_url,
                         "confidence": row.confidence,
                         "warnings": row.warnings,
+                        "autofix_actions": row.autofix_actions,
                         "qa_flags": row.qa_flags,
                         "qa_severity": row.qa_severity,
                         "raw_excerpt": row.raw_excerpt,
@@ -179,6 +194,7 @@ def _write_review_queue(rows: list[NormalizedRow], path: Path, *, template_path:
             "sheet_name": row.sheet_name,
             "confidence": row.confidence,
             "warnings": ", ".join(row.warnings),
+            "autofix_actions": ", ".join(row.autofix_actions),
             "qa_flags": ", ".join(row.qa_flags),
             "qa_severity": row.qa_severity,
             "source_name": row.source_name,
@@ -220,6 +236,80 @@ def _prepare_output_sheet(sheet, *, program: str, style_pack: TemplateStylePack)
     for row_index in range(3, sheet.max_row + 1):
         for column in range(1, len(BODY_COLUMNS) + 1):
             sheet.cell(row_index, column).value = None
+
+
+def _write_autofix_report_json(rows: list[NormalizedRow], action_counts: Counter[str], path: Path) -> None:
+    ensure_parent(path)
+    payload = {
+        "rows_with_autofix": len(rows),
+        "action_counts": dict(sorted(action_counts.items())),
+        "rows": [
+            {
+                "faculty": row.faculty,
+                "program": row.program,
+                "sheet_name": row.sheet_name,
+                "subject": row.subject,
+                "source_name": row.source_name,
+                "source_root_url": row.source_root_url,
+                "asset_locator": row.asset_locator,
+                "qa_severity": row.qa_severity,
+                "autofix_actions": row.autofix_actions,
+                "warnings": row.warnings,
+                "raw_excerpt": row.raw_excerpt,
+            }
+            for row in rows
+        ],
+    }
+    path.write_text(json_dumps(payload) + "\n", encoding="utf-8")
+
+
+def _write_autofix_report_xlsx(rows: list[NormalizedRow], action_counts: Counter[str], path: Path) -> None:
+    workbook = Workbook()
+    summary_sheet = workbook.active
+    summary_sheet.title = "summary"
+    summary_headers = ["action", "count"]
+    for column, title in enumerate(summary_headers, start=1):
+        summary_sheet.cell(1, column).value = title
+    row_index = 2
+    for action, count in sorted(action_counts.items()):
+        summary_sheet.cell(row_index, 1).value = action
+        summary_sheet.cell(row_index, 2).value = count
+        row_index += 1
+
+    rows_sheet = workbook.create_sheet("rows")
+    row_headers = [
+        "faculty",
+        "program",
+        "sheet_name",
+        "subject",
+        "source_name",
+        "source_root_url",
+        "asset_locator",
+        "qa_severity",
+        "autofix_actions",
+        "warnings",
+        "raw_excerpt",
+    ]
+    for column, title in enumerate(row_headers, start=1):
+        rows_sheet.cell(1, column).value = title
+    for row_index, row in enumerate(rows, start=2):
+        values = [
+            row.faculty,
+            row.program,
+            row.sheet_name,
+            row.subject,
+            row.source_name,
+            row.source_root_url,
+            row.asset_locator,
+            row.qa_severity,
+            ", ".join(row.autofix_actions),
+            ", ".join(row.warnings),
+            row.raw_excerpt,
+        ]
+        for column, value in enumerate(values, start=1):
+            _set_cell_value(rows_sheet.cell(row_index, column), value)
+    ensure_parent(path)
+    workbook.save(path)
 
 
 def _write_body_row(sheet, row_index: int, row: NormalizedRow, style_pack: TemplateStylePack) -> None:

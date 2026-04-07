@@ -4,7 +4,7 @@ import re
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from .models import NormalizedRow, ParsedDocument, RawRecord
 from .utils import (
@@ -176,20 +176,24 @@ def normalize_record(record: RawRecord, *, document: ParsedDocument) -> Normaliz
     source_name = source_asset.source_name
     source_root_url = source_asset.source_root_url or source_asset.source_url_or_path or source_asset.locator
     source_label = humanize_source_name(source_name)
+    autofix_actions: list[str] = []
 
     subject_inferred = False
     if not values["subject"] and values["lesson_type"].casefold() in SUBJECT_FALLBACK_LESSON_TYPES:
         values["subject"] = values["lesson_type"]
         subject_inferred = True
         record.warnings.append("subject_inferred_from_lesson_type")
+        autofix_actions.append("subject_from_lesson_type")
     if not values["subject"] and any(pattern in values["notes"].casefold() for pattern in SUBJECT_FALLBACK_NOTES_PATTERNS):
         values["subject"] = values["notes"]
         subject_inferred = True
         record.warnings.append("subject_inferred_from_notes")
+        autofix_actions.append("subject_from_notes")
     if not values["subject"] and _looks_like_non_class_marker(values["notes"]):
         values["subject"] = _normalize_non_class_subject(values["notes"])
         subject_inferred = True
         record.warnings.append("subject_inferred_from_non_class_note")
+        autofix_actions.append("subject_from_non_class_note")
     if (
         not values["subject"]
         and _looks_like_subject_candidate(values["groups"])
@@ -198,6 +202,7 @@ def normalize_record(record: RawRecord, *, document: ParsedDocument) -> Normaliz
         values["subject"] = values["groups"]
         subject_inferred = True
         record.warnings.append("subject_inferred_from_groups")
+        autofix_actions.append("subject_from_groups")
 
     cleaned_fields = _cleanup_structured_fields(values)
     if not cleaned_fields["subject"]:
@@ -205,18 +210,30 @@ def normalize_record(record: RawRecord, *, document: ParsedDocument) -> Normaliz
         if inferred_from_notes:
             subject_inferred = True
             record.warnings.append("subject_inferred_from_notes")
+            autofix_actions.append("subject_from_notes")
+    autofix_actions.extend(_detect_cleanup_autofixes(values, cleaned_fields))
     week_type, week_source = normalize_week_type_meta(
         values["week_type"],
         cleaned_fields["subject"],
         cleaned_fields["notes"],
         record.raw_excerpt,
     )
+    if week_source == "default":
+        autofix_actions.append("week_type_defaulted")
+    elif week_source == "inferred":
+        autofix_actions.append("week_type_inferred")
 
     start_time = parse_time_value(values["start_time"])
     end_time = parse_time_value(values["end_time"])
+    parsed_start_time = start_time
+    parsed_end_time = end_time
     if (not start_time or not end_time) and values["raw_time"]:
         start_time, end_time = parse_time_range(values["raw_time"])
     start_time, end_time = _infer_missing_time_bounds(start_time, end_time, cleaned_fields)
+    if not parsed_start_time and start_time:
+        autofix_actions.append("start_time_inferred")
+    if not parsed_end_time and end_time:
+        autofix_actions.append("end_time_inferred")
 
     warnings = list(dict.fromkeys(record.warnings))
     if not cleaned_fields["day"]:
@@ -251,6 +268,8 @@ def normalize_record(record: RawRecord, *, document: ParsedDocument) -> Normaliz
     display_stem = Path(flatten_multiline(source_asset.display_name) or source_label).stem
     note_program_hint = _extract_program_hint(cleaned_fields["notes"])
     asset_label = infer_asset_label_from_locator(source_asset.locator)
+    if note_program_hint and not cleaned_fields["program"]:
+        autofix_actions.append("program_from_notes")
     program = coalesce_label(
         cleaned_fields["program"],
         note_program_hint,
@@ -260,7 +279,10 @@ def normalize_record(record: RawRecord, *, document: ParsedDocument) -> Normaliz
         source_label,
         fallback="Невідома програма",
     )
-    program = _normalize_program_label(program)
+    normalized_program = _normalize_program_label(program)
+    if normalized_program != program and normalized_program:
+        autofix_actions.append("program_label_normalized")
+    program = normalized_program
 
     return NormalizedRow(
         program=program,
@@ -286,6 +308,7 @@ def normalize_record(record: RawRecord, *, document: ParsedDocument) -> Normaliz
         source_url_or_path=source_root_url,
         confidence=confidence,
         warnings=warnings,
+        autofix_actions=list(dict.fromkeys(autofix_actions)),
         raw_excerpt=record.raw_excerpt,
         content_hash=document.asset.content_hash,
     )
@@ -583,7 +606,7 @@ def _merge_unique(values: list[str], *, separator: str = "; ") -> str:
     return separator.join(_unique_list(values))
 
 
-def _unique_list(values: list[str]) -> list[str]:
+def _unique_list(values: Iterable[str]) -> list[str]:
     seen: set[str] = set()
     result: list[str] = []
     for value in values:
@@ -761,3 +784,18 @@ def _infer_subject_from_notes(cleaned_fields: dict[str, str]) -> tuple[dict[str,
     updated["subject"] = subject_candidates[0]
     updated["notes"] = _merge_unique(residual_notes)
     return updated, True
+
+
+def _detect_cleanup_autofixes(original_fields: dict[str, str], cleaned_fields: dict[str, str]) -> list[str]:
+    actions: list[str] = []
+    if original_fields["subject"] and not original_fields["teacher"] and cleaned_fields["teacher"]:
+        actions.append("teacher_from_subject")
+    if original_fields["subject"] and not original_fields["room"] and cleaned_fields["room"]:
+        actions.append("room_from_subject")
+    if original_fields["subject"] and not original_fields["link"] and cleaned_fields["link"]:
+        actions.append("link_from_subject")
+    if original_fields["subject"] and cleaned_fields["subject"] and cleaned_fields["subject"] != original_fields["subject"]:
+        actions.append("subject_cleaned")
+    if original_fields["subject"] and not cleaned_fields["subject"] and cleaned_fields["notes"]:
+        actions.append("subject_moved_to_notes")
+    return actions

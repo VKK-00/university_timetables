@@ -118,6 +118,7 @@ class NormalizedRow:
     source_url_or_path: str = ""
     confidence: float = 1.0
     warnings: list[str] = field(default_factory=list)
+    autofix_actions: list[str] = field(default_factory=list)
     qa_flags: list[str] = field(default_factory=list)
     qa_severity: str = "none"
     raw_excerpt: str = ""
@@ -174,6 +175,9 @@ class PipelineOutput:
     review_rows: list[NormalizedRow]
     source_summary_path: Path | None = None
     source_report_path: Path | None = None
+    autofix_report_json_path: Path | None = None
+    autofix_report_xlsx_path: Path | None = None
+    autofix_rows: int = 0
     qa_report_json_path: Path | None = None
     qa_report_xlsx_path: Path | None = None
     qa_failures: int = 0

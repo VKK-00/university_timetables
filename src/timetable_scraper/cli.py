@@ -51,12 +51,17 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Source summary: {result.source_summary_path}")
         if result.source_report_path:
             print(f"Source report: {result.source_report_path}")
+        if result.autofix_report_json_path:
+            print(f"Autofix report (json): {result.autofix_report_json_path}")
+        if result.autofix_report_xlsx_path:
+            print(f"Autofix report (xlsx): {result.autofix_report_xlsx_path}")
         if result.qa_report_json_path:
             print(f"QA report (json): {result.qa_report_json_path}")
         if result.qa_report_xlsx_path:
             print(f"QA report (xlsx): {result.qa_report_xlsx_path}")
         print(f"Accepted rows: {len(result.rows)}")
         print(f"Review rows: {len(result.review_rows)}")
+        print(f"Rows with autofixes: {result.autofix_rows}")
         print(f"QA warnings: {result.qa_warnings}")
         print(f"QA failures: {result.qa_failures}")
         return 0 if result.qa_failures == 0 else 1

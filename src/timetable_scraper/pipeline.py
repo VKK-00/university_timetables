@@ -3,11 +3,11 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from pathlib import Path
 
-import requests
+import requests  # type: ignore[import-untyped]
 
 from .adapters import parse_asset
 from .discovery import discover_source, discover_sources
-from .export import export_rows
+from .export import export_rows, write_autofix_report
 from .fetch import fetch_asset
 from .models import AppConfig, PipelineOutput
 from .normalize import normalize_document
@@ -43,6 +43,10 @@ def run_pipeline(config: AppConfig) -> PipelineOutput:
         template_path=config.template_path,
         output_dir=config.output_dir,
     )
+    autofix_report_json_path, autofix_report_xlsx_path, autofix_rows = write_autofix_report(
+        [*accepted, *review],
+        output_dir=config.output_dir,
+    )
     workbook_qa, qa_report_json_path, qa_report_xlsx_path = audit_exported_workbooks(
         exported_files,
         output_dir=config.output_dir,
@@ -64,6 +68,9 @@ def run_pipeline(config: AppConfig) -> PipelineOutput:
         review_rows=review,
         source_summary_path=source_summary_path,
         source_report_path=source_report_path,
+        autofix_report_json_path=autofix_report_json_path,
+        autofix_report_xlsx_path=autofix_report_xlsx_path,
+        autofix_rows=autofix_rows,
         qa_report_json_path=qa_report_json_path,
         qa_report_xlsx_path=qa_report_xlsx_path,
         qa_failures=sum(1 for item in workbook_qa if item.status == "fail"),

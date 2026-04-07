@@ -106,7 +106,6 @@ def _fetch_google_resolved(url: str, session: requests.Session, fallback: reques
 
 
 def _fetch_onedrive_resolved(url: str, session: requests.Session, fallback: requests.Response | None = None) -> requests.Response:
-    parsed = urlparse(url)
     response_chain = [response for response in [fallback] if response is not None]
     if fallback is None:
         fallback = _probe_remote(url, session=session)

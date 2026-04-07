@@ -187,9 +187,9 @@ def _parse_grid_schedule_table(
             axis_time_columns.add(column)
 
     if not axis_day_columns and day_scores:
-        axis_day_columns.add(max(day_scores, key=day_scores.get))
+        axis_day_columns.add(max(day_scores.items(), key=lambda item: item[1])[0])
     if not axis_time_columns and time_scores:
-        axis_time_columns.add(max(time_scores, key=time_scores.get))
+        axis_time_columns.add(max(time_scores.items(), key=lambda item: item[1])[0])
 
     if not axis_day_columns or not axis_time_columns:
         return []

@@ -22,6 +22,8 @@ def test_pipeline_runs_against_real_archive(tmp_path: Path) -> None:
     assert result.exported_files
     assert result.manifest_path.exists()
     assert result.review_queue_path.exists()
+    assert result.autofix_report_json_path and result.autofix_report_json_path.exists()
+    assert result.autofix_report_xlsx_path and result.autofix_report_xlsx_path.exists()
     sample_workbook = load_workbook(result.exported_files[0])
     assert sample_workbook.sheetnames
     assert result.rows
@@ -99,6 +101,8 @@ def test_pipeline_skips_unavailable_assets(monkeypatch, tmp_path: Path) -> None:
     assert len(result.rows) == 1
     assert not result.review_rows
     assert result.exported_files
+    assert result.autofix_report_json_path and result.autofix_report_json_path.exists()
+    assert result.autofix_report_xlsx_path and result.autofix_report_xlsx_path.exists()
     assert result.qa_failures == 1
 
 
@@ -122,6 +126,10 @@ def test_pipeline_cleans_previous_output_dir(tmp_path: Path, monkeypatch) -> Non
     monkeypatch.setattr(
         "timetable_scraper.pipeline.export_rows",
         lambda rows, review_rows, *, template_path, output_dir: ([], output_dir / "manifest.jsonl", output_dir / "review_queue.xlsx"),
+    )
+    monkeypatch.setattr(
+        "timetable_scraper.pipeline.write_autofix_report",
+        lambda rows, *, output_dir: (output_dir / "autofix_report.json", output_dir / "autofix_report.xlsx", 0),
     )
     monkeypatch.setattr(
         "timetable_scraper.pipeline.audit_exported_workbooks",

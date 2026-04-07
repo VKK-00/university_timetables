@@ -10,6 +10,7 @@
 - Main CLI entrypoints: `doctor`, `inspect-source`, `run`
 - Output format is template-driven: row 1 contains the program title, row 2 contains headers, row 3+ contains normalized rows
 - Row-level QA removes broken or ambiguous records from final Excel output and moves them to `review_queue.xlsx`
+- Autofixes are tracked per row and exported into dedicated autofix reports for every run
 - Workbook-level QA checks every exported `.xlsx`; `run` keeps outputs but returns non-zero if any workbook fails QA
 - The project is intentionally KNU-first. It does not claim that every official KNU source is fully parseable today
 
@@ -27,8 +28,9 @@
 
 Latest full KNU web run source of truth: April 7, 2026
 
-- `42905` accepted rows
-- `9062` review rows
+- `42921` accepted rows
+- `9030` review rows
+- `51861` rows with autofixes
 - `0` QA warnings
 - `0` QA failures
 
@@ -40,7 +42,7 @@ Current source statuses:
 
 Largest parsed sources in the current run:
 
-- `FIT: 26793 accepted, 1075 review`
+- `FIT: 26809 accepted, 1043 review`
 - `Physics: 6605 accepted, 5018 review`
 - `Sociology: 3937 accepted, 347 review`
 
@@ -137,6 +139,8 @@ sources:
 - `out/<faculty>/<program>.xlsx`: normalized schedule workbooks exported in the template layout
 - `out/manifest.jsonl`: one JSON line per normalized row with provenance, warnings, confidence, and content hash
 - `out/review_queue.xlsx`: rows that failed QA or remained ambiguous after parsing
+- `out/autofix_report.json`: machine-readable summary of autofix actions applied during normalization
+- `out/autofix_report.xlsx`: readable autofix summary and per-row autofix trace
 - `out/qa_report.json`: machine-readable workbook QA summary
 - `out/qa_report.xlsx`: readable workbook QA summary
 - `out_knu_web/source_summary.md`: source-level status summary for the KNU web run
@@ -165,6 +169,7 @@ Additional guarantees in the current pipeline:
 
 - `week_type` is always filled; if no reliable week marker exists, the default is `Обидва`
 - `week_source` is preserved in normalized data
+- `autofix_actions` is preserved in normalized data, `manifest.jsonl`, and `review_queue.xlsx`
 - `run` cleans the target output directory before writing a new result set
 
 ## OCR Requirements
@@ -196,15 +201,18 @@ If OCR dependencies are missing, `doctor` fails explicitly and `run` should not 
 
 Current non-parsed KNU statuses:
 
-- `confirmed-blocker`: `CSC`, `Law`, `Military`, `IIR`
+- `confirmed-blocker`: `CSC`, `Military`, `IIR`
 - `review-only`: `Philology`
 
 ## Development and Tests
 
-Run the regression suite:
+Run the main validation suite:
 
 ```powershell
+python -m ruff check src tests
+python -m mypy src
 pytest -q
+python -m build
 ```
 
 Useful commands during development:
