@@ -59,19 +59,20 @@ TEACHER_TEXT_RE = re.compile(
     r"(?iu)(?:\b(?:проф|доц|ас|викл|ст\.?\s*викл|phd|к\.\s*[юф]\.\s*н|д\.\s*[юф]\.\s*н)\.?\b|[А-ЯІЇЄҐ][а-яіїєґ'-]+\s*[А-ЯІЇЄҐ]\.\s*[А-ЯІЇЄҐ]\.)"
 )
 SERVICE_TEXT_PATTERNS = (
-    "розклад занять",
-    "графік",
-    "списки груп",
-    "теоретичне навчання",
-    "інформаційний проспект",
-    "правила прийому",
-    "наукові керівники",
-    "програма розвитку",
-    "звіт декана",
-    "meeting id",
-    "passcode",
-    "код доступу",
-    "ідентифікатор конференції",
+    re.compile(r"(?iu)\bрозклад\s+занять\b"),
+    re.compile(r"(?iu)\bграфік\b"),
+    re.compile(r"(?iu)\bсписки\s+груп\b"),
+    re.compile(r"(?iu)\bтеоретичне\s+навчання\b"),
+    re.compile(r"(?iu)\bінформаційний\s+проспект\b"),
+    re.compile(r"(?iu)\bправила\s+прийому\b"),
+    re.compile(r"(?iu)\bнаукові\s+керівники\b"),
+    re.compile(r"(?iu)\bпрограма\s+розвитку\b"),
+    re.compile(r"(?iu)\bзвіт\s+декана\b"),
+    re.compile(r"(?iu)\bmeeting\s+id\b"),
+    re.compile(r"(?iu)\bpasscode\b"),
+    re.compile(r"(?iu)\bкод\s+доступу\b"),
+    re.compile(r"(?iu)\bідентифікатор\s+конференції\b"),
+    re.compile(r"(?iu)\bидентификатор\s+конференции\b"),
 )
 TECHNICAL_LABEL_PATTERNS = (
     re.compile(r"(?iu)^pdf(?:-table.*)?$"),
@@ -304,7 +305,7 @@ def looks_like_teacher_text(value: Any) -> bool:
 
 def looks_like_service_text(value: Any) -> bool:
     text = flatten_multiline(value).casefold()
-    return bool(text) and any(pattern in text for pattern in SERVICE_TEXT_PATTERNS)
+    return bool(text) and any(pattern.search(text) for pattern in SERVICE_TEXT_PATTERNS)
 
 
 def looks_like_garbage_text(value: Any) -> bool:
@@ -324,6 +325,15 @@ def looks_like_garbage_text(value: Any) -> bool:
     compact = re.sub(r"[\W_]+", "", text, flags=re.UNICODE)
     if compact and len(compact) >= 60 and len(set(compact.casefold())) <= 8:
         return True
+    compact_token = text.replace(" ", "")
+    if " " not in text and re.fullmatch(r"[A-Za-z0-9+/=_-]{8,}", compact_token):
+        has_signal = (
+            any(character.isdigit() for character in compact_token)
+            or any(character in "+/=_-" for character in compact_token)
+            or (re.search(r"[A-Z]", compact_token) and re.search(r"[a-z]", compact_token))
+        )
+        if has_signal:
+            return True
     return False
 
 

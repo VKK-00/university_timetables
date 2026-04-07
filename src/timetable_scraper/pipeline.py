@@ -11,7 +11,7 @@ from .export import export_rows
 from .fetch import fetch_asset
 from .models import AppConfig, PipelineOutput
 from .normalize import normalize_document
-from .qa import audit_exported_workbooks, partition_rows
+from .qa import audit_exported_workbooks, partition_rows, refine_group_quality
 from .reporting import build_source_summaries, write_source_summaries
 
 
@@ -35,6 +35,7 @@ def run_pipeline(config: AppConfig) -> PipelineOutput:
             runtime_issues[asset.source_name].append(f"{exc.__class__.__name__}: {exc}")
 
     accepted, review = partition_rows(normalized_rows, threshold=config.confidence_threshold)
+    accepted, review = refine_group_quality(accepted, review)
     _prepare_output_dir(config.output_dir)
     exported_files, manifest_path, review_queue_path = export_rows(
         accepted,

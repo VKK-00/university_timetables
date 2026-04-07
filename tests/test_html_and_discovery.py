@@ -101,6 +101,30 @@ def test_discovery_expands_public_google_drive_folders() -> None:
     assert any(asset.origin_kind == "public_folder" for asset in result.assets if asset.locator != root_url)
 
 
+def test_discovery_skips_non_schedule_promotional_assets() -> None:
+    url = "https://example.edu/faculty/schedule"
+    html = """
+    <html><body>
+      <a href="/files/rozklad_2_sem.pdf">Розклад 2 семестр</a>
+      <a href="/files/information_booklet.pdf">Інформаційний проспект факультету</a>
+      <a href="/files/dean_report.pdf">Звіт декана</a>
+    </body></html>
+    """
+    session = FakeSession({url: html})
+    source = SourceConfig(
+        kind="web_page",
+        name="faculty-web",
+        url=url,
+        allow_domains=["example.edu"],
+        schedule_keywords=["розклад", "schedule"],
+    )
+    result = discover_source(source, session=session)
+    locators = {asset.locator for asset in result.assets}
+    assert "https://example.edu/files/rozklad_2_sem.pdf" in locators
+    assert "https://example.edu/files/information_booklet.pdf" not in locators
+    assert "https://example.edu/files/dean_report.pdf" not in locators
+
+
 def test_html_table_adapter_parses_rows() -> None:
     html = (WEB_DIR / "faculty_table.html").read_text(encoding="utf-8")
     asset = DiscoveredAsset(

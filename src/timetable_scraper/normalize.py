@@ -74,6 +74,16 @@ INFORMATIONAL_NOTE_PATTERNS = (
 FILL_DOWN_FIELDS = ("week_type", "day", "start_time", "end_time")
 DEFAULT_SLOT_DURATION_MINUTES = 80
 SEGMENT_SPLIT_RE = re.compile(r"\s*(?:\||;|/)\s*")
+SURNAME_ONLY_RE = re.compile(r"(?iu)^[А-ЯІЇЄҐ][а-яіїєґ'-]+$")
+INITIALS_ONLY_RE = re.compile(r"(?iu)^[А-ЯІЇЄҐ]\.\s*[А-ЯІЇЄҐ]\.?$")
+TITLE_ONLY_RE = re.compile(r"(?iu)^(?:проф|доц|ас|асист|викл|ст\.?\s*викл|phd|к\.\s*[юф]\.\s*н|д\.\s*[юф]\.\s*н)\.?$")
+ROOM_SEGMENT_RE = re.compile(r"(?iu)^(?:\d{3,4}[А-ЯІЇЄҐA-Z]?(?:/\d+)?|[А-ЯІЇЄҐA-Z]-?\d{2,4}|online|онлайн)$")
+CODE_SEGMENT_RE = re.compile(r"(?iu)^(?:meeting id|passcode|код доступу|ідентифікатор конференції|идентификатор конференции|t=\d+)\b|^[A-Za-z0-9+/=_-]{10,}$")
+TRAILING_ROOM_RE = re.compile(
+    r"(?iu)^(?P<subject>.+?)(?:\s*/\s*|\s+)(?P<room>(?:\d{3,4}[А-ЯІЇЄҐA-Z]?|[А-ЯІЇЄҐA-Z]-?\d{2,4}|(?:хімічний|географічний)\s+ф-?т\s+\d{2,4}))$"
+)
+MEETING_NOTE_RE = re.compile(r"(?iu)\b(?:meeting id|passcode|код доступу|ідентифікатор конференції|идентификатор конференции)\b")
+MEETING_ABBR_RE = re.compile(r"(?iu)^(?:ік|кд|id|pwd)\s*:")
 
 
 def map_headers(headers: list[Any]) -> dict[str, int]:
@@ -167,6 +177,11 @@ def normalize_record(record: RawRecord, *, document: ParsedDocument) -> Normaliz
         record.warnings.append("subject_inferred_from_groups")
 
     cleaned_fields = _cleanup_structured_fields(values)
+    if not cleaned_fields["subject"]:
+        cleaned_fields, inferred_from_notes = _infer_subject_from_notes(cleaned_fields)
+        if inferred_from_notes:
+            subject_inferred = True
+            record.warnings.append("subject_inferred_from_notes")
     week_type, week_source = normalize_week_type_meta(
         values["week_type"],
         cleaned_fields["subject"],
@@ -373,7 +388,7 @@ def _cleanup_structured_fields(values: dict[str, str]) -> dict[str, str]:
             *room_notes,
         ]
     )
-    return {
+    cleaned = {
         "program": normalize_service_tokens(values["program"]),
         "faculty": normalize_service_tokens(values["faculty"]),
         "day": values["day"],
@@ -386,6 +401,7 @@ def _cleanup_structured_fields(values: dict[str, str]) -> dict[str, str]:
         "course": normalize_service_tokens(values["course"]),
         "notes": notes_text,
     }
+    return _postprocess_structured_fields(cleaned)
 
 
 def _cleanup_subject(text: str) -> tuple[str, list[str], list[str], list[str], list[str]]:
@@ -396,17 +412,36 @@ def _cleanup_subject(text: str) -> tuple[str, list[str], list[str], list[str], l
     room_parts: list[str] = []
     link_parts: list[str] = []
     note_parts: list[str] = []
-    for segment in _split_segments(text):
+    segments = _split_segments(text)
+    index = 0
+    while index < len(segments):
+        segment = segments[index]
+        teacher_segment, consumed = _consume_compound_teacher_segment(segments, index)
+        if teacher_segment:
+            teacher_parts.append(teacher_segment)
+            index += consumed
+            continue
+        if _looks_like_room_segment(segment):
+            room_parts.append(_normalize_room_segment(segment))
+            index += 1
+            continue
+        if _looks_like_code_segment(segment):
+            note_parts.append(segment)
+            index += 1
+            continue
         residual, teachers, rooms, links = _extract_entities(segment)
         teacher_parts.extend(teachers)
         room_parts.extend(rooms)
         link_parts.extend(links)
         if not residual:
+            index += 1
             continue
         if looks_like_service_text(residual):
             note_parts.append(residual)
+            index += 1
             continue
         subject_parts.append(residual)
+        index += 1
     return _merge_unique(subject_parts, separator=" / "), teacher_parts, room_parts, link_parts, note_parts
 
 
@@ -478,3 +513,126 @@ def _unique_list(values: list[str]) -> list[str]:
         seen.add(cleaned)
         result.append(cleaned)
     return result
+
+
+def _postprocess_structured_fields(cleaned_fields: dict[str, str]) -> dict[str, str]:
+    updated = dict(cleaned_fields)
+    updated["subject"], trailing_room, trailing_notes = _peel_subject_tail_metadata(updated["subject"])
+    if trailing_room:
+        updated["room"] = _merge_unique([updated["room"], trailing_room])
+    if trailing_notes:
+        updated["notes"] = _merge_unique([updated["notes"], *trailing_notes])
+    if MEETING_NOTE_RE.search(updated["subject"]) or MEETING_ABBR_RE.search(updated["subject"]):
+        updated["notes"] = _merge_unique([updated["notes"], updated["subject"]])
+        updated["subject"] = ""
+    return updated
+
+
+def _consume_compound_teacher_segment(segments: list[str], index: int) -> tuple[str, int]:
+    current = normalize_service_tokens(segments[index])
+    next_segment = normalize_service_tokens(segments[index + 1]) if index + 1 < len(segments) else ""
+    after_next = normalize_service_tokens(segments[index + 2]) if index + 2 < len(segments) else ""
+    if SURNAME_ONLY_RE.fullmatch(current) and INITIALS_ONLY_RE.fullmatch(next_segment):
+        return f"{current} {_normalize_initials(next_segment)}", 2
+    if TITLE_ONLY_RE.fullmatch(current) and SURNAME_ONLY_RE.fullmatch(next_segment) and INITIALS_ONLY_RE.fullmatch(after_next):
+        return f"{current} {next_segment} {_normalize_initials(after_next)}", 3
+    return "", 0
+
+
+def _normalize_initials(value: str) -> str:
+    return normalize_service_tokens(value).replace(" ", "")
+
+
+def _looks_like_room_segment(value: str) -> bool:
+    cleaned = normalize_service_tokens(value)
+    return bool(cleaned) and bool(ROOM_SEGMENT_RE.fullmatch(cleaned))
+
+
+def _normalize_room_segment(value: str) -> str:
+    cleaned = normalize_service_tokens(value)
+    if cleaned.casefold() in {"online", "онлайн"}:
+        return cleaned
+    if cleaned.casefold().startswith(("ауд.", "каб.", "корп.")):
+        return cleaned
+    return f"ауд. {cleaned}"
+
+
+def _extract_trailing_room_from_subject(subject: str) -> tuple[str, str]:
+    cleaned = normalize_service_tokens(subject)
+    if not cleaned:
+        return "", ""
+    match = TRAILING_ROOM_RE.fullmatch(cleaned)
+    if not match:
+        return cleaned, ""
+    subject_part = normalize_service_tokens(match.group("subject")).strip(" /")
+    room_part = _normalize_room_segment(match.group("room"))
+    return subject_part, room_part
+
+
+def _looks_like_code_segment(value: str) -> bool:
+    cleaned = normalize_service_tokens(value)
+    if not cleaned:
+        return False
+    compact = cleaned.replace(" ", "")
+    if CODE_SEGMENT_RE.fullmatch(cleaned):
+        return True
+    if len(compact) >= 6 and compact.isdigit():
+        return True
+    if len(compact) >= 6 and re.fullmatch(r"[A-Za-z0-9._=+-]+", compact):
+        return any(character.isalpha() for character in compact) and any(character.isdigit() for character in compact)
+    return False
+
+
+def _peel_subject_tail_metadata(subject: str) -> tuple[str, str, list[str]]:
+    segments = _split_segments(subject)
+    if not segments:
+        return "", "", []
+    note_parts: list[str] = []
+    room_part = ""
+    while segments:
+        tail = normalize_service_tokens(segments[-1])
+        if _looks_like_code_segment(tail):
+            note_parts.insert(0, tail)
+            segments.pop()
+            continue
+        if not room_part and _looks_like_room_segment(tail):
+            room_part = _normalize_room_segment(tail)
+            segments.pop()
+            continue
+        break
+    subject_part = _merge_unique(segments, separator=" / ")
+    subject_part, trailing_room = _extract_trailing_room_from_subject(subject_part)
+    room_value = _merge_unique([room_part, trailing_room])
+    return subject_part, room_value, note_parts
+
+
+def _infer_subject_from_notes(cleaned_fields: dict[str, str]) -> tuple[dict[str, str], bool]:
+    note_segments = _split_segments(cleaned_fields.get("notes", ""))
+    if not note_segments:
+        return cleaned_fields, False
+    subject_candidates: list[str] = []
+    residual_notes: list[str] = []
+    for segment in note_segments:
+        cleaned = normalize_service_tokens(segment)
+        if not cleaned:
+            continue
+        if (
+            contains_link_text(cleaned)
+            or looks_like_teacher_text(cleaned)
+            or looks_like_room_text(cleaned)
+            or _looks_like_code_segment(cleaned)
+            or looks_like_service_text(cleaned)
+            or looks_like_garbage_text(cleaned)
+        ):
+            residual_notes.append(cleaned)
+            continue
+        if _looks_like_subject_candidate(cleaned):
+            subject_candidates.append(cleaned)
+            continue
+        residual_notes.append(cleaned)
+    if len(subject_candidates) != 1:
+        return cleaned_fields, False
+    updated = dict(cleaned_fields)
+    updated["subject"] = subject_candidates[0]
+    updated["notes"] = _merge_unique(residual_notes)
+    return updated, True

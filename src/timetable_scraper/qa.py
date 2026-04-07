@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 import re
 
@@ -33,6 +33,8 @@ HARD_FAIL_FLAGS = {
     "garbage_text",
     "inconsistent_columns",
 }
+LESSON_TEXT_RE = re.compile(r"(?iu)\((?:лек|прак|сем|лаб|lek|sem|prac)")
+TRAILING_ROOM_RE = re.compile(r"(?iu)(?:\s*/\s*|\s+)(?:\d{3,4}[А-ЯІЇЄҐA-Z]?|[А-ЯІЇЄҐA-Z]-?\d{2,4}|(?:хімічний|географічний)\s+ф-?т\s+\d{2,4})$")
 
 
 def partition_rows(rows: list[NormalizedRow], threshold: float) -> tuple[list[NormalizedRow], list[NormalizedRow]]:
@@ -49,6 +51,42 @@ def partition_rows(rows: list[NormalizedRow], threshold: float) -> tuple[list[No
     return accepted, review
 
 
+def refine_group_quality(accepted: list[NormalizedRow], review: list[NormalizedRow]) -> tuple[list[NormalizedRow], list[NormalizedRow]]:
+    groups: dict[tuple[str, str, str, str, str, str, str, str], list[NormalizedRow]] = defaultdict(list)
+    for row in accepted:
+        if not row.sheet_name.startswith("pdf"):
+            continue
+        key = (
+            row.source_root_url,
+            row.asset_locator,
+            row.sheet_name,
+            row.day,
+            row.start_time,
+            row.end_time,
+            row.course,
+            row.groups,
+        )
+        groups[key].append(row)
+
+    demoted: set[int] = set()
+    for rows in groups.values():
+        bare_rows = [
+            row
+            for row in rows
+            if not any(value.strip() for value in (row.teacher, row.room, row.link, row.notes))
+        ]
+        if len(bare_rows) < 2:
+            continue
+        if not any(_looks_like_fragment_subject(row.subject) for row in bare_rows):
+            continue
+        for row in bare_rows:
+            row.qa_flags = list(dict.fromkeys([*row.qa_flags, "inconsistent_columns"]))
+            row.qa_severity = "fail"
+            review.append(row)
+            demoted.add(id(row))
+    return [row for row in accepted if id(row) not in demoted], review
+
+
 def analyze_row_quality(row: NormalizedRow) -> NormalizedRow:
     flags = list(dict.fromkeys(row.qa_flags))
     subject = row.subject.strip()
@@ -60,6 +98,8 @@ def analyze_row_quality(row: NormalizedRow) -> NormalizedRow:
         flags.append("missing_subject")
     if subject and looks_like_room_text(subject):
         flags.append("subject_contains_room")
+    if subject and TRAILING_ROOM_RE.search(subject):
+        flags.append("subject_contains_room")
     if subject and looks_like_teacher_text(subject):
         flags.append("subject_contains_teacher")
     if subject and contains_link_text(subject):
@@ -68,9 +108,13 @@ def analyze_row_quality(row: NormalizedRow) -> NormalizedRow:
         flags.append("subject_too_long")
     if row.teacher and len(row.teacher) > 180:
         flags.append("teacher_too_long")
+    if row.teacher and (LESSON_TEXT_RE.search(row.teacher) or re.search(r"\b\d{3,4}\b", row.teacher) or re.search(r"\b\d{1,2}[.:]\d{2}\b", row.teacher)):
+        flags.append("inconsistent_columns")
     if subject and looks_like_service_text(subject):
         flags.append("garbage_text")
     if subject and looks_like_garbage_text(subject):
+        flags.append("garbage_text")
+    if subject and any(token in subject.casefold() for token in ("?pwd=", "?p=", ".us")):
         flags.append("garbage_text")
     if subject and subject.count(" / ") >= 2:
         flags.append("inconsistent_columns")
@@ -86,7 +130,17 @@ def analyze_row_quality(row: NormalizedRow) -> NormalizedRow:
         flags.append("garbage_text")
     if subject and not any(character.isalpha() for character in subject):
         flags.append("garbage_text")
-    if subject and re.fullmatch(r"[A-Za-z0-9+/=_-]{8,}", subject.replace(" ", "")):
+    compact_subject = subject.replace(" ", "")
+    if (
+        subject
+        and " " not in subject
+        and re.fullmatch(r"[A-Za-z0-9+/=_-]{8,}", compact_subject)
+        and (
+            any(character.isdigit() for character in compact_subject)
+            or any(character in "+/=_-" for character in compact_subject)
+            or (re.search(r"[A-Z]", compact_subject) and re.search(r"[a-z]", compact_subject))
+        )
+    ):
         flags.append("garbage_text")
     if subject and " " not in subject and re.fullmatch(r"[A-Za-z0-9=._-]{10,}", subject):
         flags.append("garbage_text")
@@ -100,6 +154,23 @@ def analyze_row_quality(row: NormalizedRow) -> NormalizedRow:
     row.qa_flags = list(dict.fromkeys(flags))
     row.qa_severity = severity
     return row
+
+
+def _looks_like_fragment_subject(subject: str) -> bool:
+    stripped = subject.strip()
+    if not stripped:
+        return True
+    if stripped[0].islower():
+        return True
+    if any(token in stripped.casefold() for token in (".us", "?pwd=", "pwd=", "ідентифікатор", "идентификатор", "конференції", "конференции")):
+        return True
+    if stripped.count("(") != stripped.count(")"):
+        return True
+    if stripped.endswith(("-", "/", ":")):
+        return True
+    if re.fullmatch(r"\([^)]{1,12}\)\s*\d{1,4}", stripped):
+        return True
+    return False
 
 
 def audit_exported_workbooks(exported_files: list[Path], *, output_dir: Path) -> tuple[list[WorkbookQaSummary], Path, Path]:

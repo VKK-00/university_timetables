@@ -19,6 +19,22 @@ GOOGLE_FOLDER_RE = re.compile(r"/drive/folders/([A-Za-z0-9_-]+)")
 GOOGLE_EMBEDDED_URL_RE = re.compile(r"https:[^<\s]*?(?=(?:\\x22|\"|'|<|\s))")
 ABSOLUTE_URL_RE = re.compile(r"https?://[^\"'\\s<>]+", re.IGNORECASE)
 RELATIVE_FILE_RE = re.compile(r"(?P<url>/[^\"'\\s<>]+(?:\.xlsx|\.xlsm|\.xls|\.csv|\.pdf)(?:\?[^\"'\\s<>]*)?)", re.IGNORECASE)
+NEGATIVE_CANDIDATE_PATTERNS = (
+    re.compile(r"(?iu)\bінформаційн(?:ий|ого)\s+проспект\b"),
+    re.compile(r"(?iu)\bпостер\b"),
+    re.compile(r"(?iu)\bзвіт(?:\s+декана)?\b"),
+    re.compile(r"(?iu)\beras(?:mus)?\b"),
+    re.compile(r"(?iu)\bdigiuni\b|\btransleader\b|\bdcomfra\b"),
+    re.compile(r"(?iu)\bгуртожит"),
+    re.compile(r"(?iu)\bстудентськ(?:е|ого)\s+самоврядування\b"),
+    re.compile(r"(?iu)\bвступн"),
+    re.compile(r"(?iu)\bконтакти\b"),
+    re.compile(r"(?iu)\bрейтингов"),
+    re.compile(r"(?iu)\bрекомендован"),
+    re.compile(r"(?iu)\bрезультат"),
+    re.compile(r"(?iu)\bсписки?\b"),
+    re.compile(r"(?iu)\bнаука\b"),
+)
 
 
 def discover_sources(sources: list[SourceConfig], session: requests.Session | None = None) -> DiscoveryResult:
@@ -215,6 +231,8 @@ def _discover_web_page(
             continue
         asset_kind, origin_kind = _classify_candidate(resolved, suffix=suffix)
         score = _score_page(f"{label} {resolved}", source.schedule_keywords)
+        if _should_skip_candidate(label=label, resolved=resolved, asset_kind=asset_kind, score=score):
+            continue
         if asset_kind == "web_link" and score <= 0:
             continue
         page_assets.append(
@@ -527,3 +545,12 @@ def _decode_embedded_url(value: str) -> str:
 def _score_page(text: str, keywords: list[str]) -> int:
     lowered = text.casefold()
     return sum(1 for keyword in keywords if keyword.casefold() in lowered)
+
+
+def _should_skip_candidate(*, label: str, resolved: str, asset_kind: str, score: int) -> bool:
+    if asset_kind not in {"file_url", "web_link"}:
+        return False
+    text = f"{label} {resolved}"
+    if any(pattern.search(text) for pattern in NEGATIVE_CANDIDATE_PATTERNS) and score <= 1:
+        return True
+    return False

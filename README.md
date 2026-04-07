@@ -6,11 +6,12 @@
 
 ## Overview / Огляд
 
-- Fixed pipeline: `discover -> fetch -> parse -> normalize -> validate/confidence -> export`.
-- Main CLI entrypoints: `doctor`, `inspect-source`, `run`.
-- Output format is template-driven: row 1 contains the program title, row 2 contains headers, row 3+ contains normalized rows.
-- The project is intentionally KNU-first. It does not claim that every KNU source is fully parseable today.
-- For official sources that are unavailable or technically unsuitable, the scraper now produces an explicit final status instead of silent zero-row output.
+- Fixed pipeline: `discover -> fetch -> parse -> normalize -> validate/confidence -> export -> post-run QA`
+- Main CLI entrypoints: `doctor`, `inspect-source`, `run`
+- Output format is template-driven: row 1 contains the program title, row 2 contains headers, row 3+ contains normalized rows
+- Row-level QA removes broken or ambiguous records from final Excel output and moves them to `review_queue.xlsx`
+- Workbook-level QA checks every exported `.xlsx`; `run` keeps outputs but returns non-zero if any workbook fails QA
+- The project is intentionally KNU-first. It does not claim that every official KNU source is fully parseable today
 
 ## What It Ingests / Що вміє тягнути
 
@@ -24,42 +25,38 @@
 
 ## Current KNU Coverage / Поточне покриття КНУ
 
-Latest full KNU web run source of truth:
-- `46080` accepted rows
-- `954` review rows
+Latest full KNU web run source of truth: April 7, 2026
 
-Parsed sources:
-- `Geo`
-- `Econom`
-- `History`
-- `Mechmat`
-- `FIT`
-- `Psychology`
-- `Sociology`
-- `Physics`
-- `Chemistry`
-- `Geology`
-- `Biomed`
+- `47594` accepted rows
+- `3245` review rows
+- `0` QA warnings
+- `0` QA failures
 
-Confirmed blockers:
-- `CSC`
-- `REX`
-- `Philosophy`
-- `Law`
-- `Military`
-- `IHT`
-- `IIR`
-- `Journalism`
-- `Philology`
+Current source statuses:
 
-FIT-specific note:
-- `FIT: 26928 accepted, 954 review`
+- `parsed`: `Geo`, `Econom`, `History`, `Mechmat`, `FIT`, `Psychology`, `REX`, `Sociology`, `Physics`, `Philosophy`, `Chemistry`, `IHT`, `Journalism`, `Geology`, `Biomed`
+- `confirmed-blocker`: `CSC`, `Law`, `Military`, `IIR`
+- `review-only`: `Philology`
+
+Largest parsed sources in the current run:
+
+- `FIT: 26794 accepted, 1047 review`
+- `Physics: 11214 accepted, 409 review`
+- `Sociology: 4107 accepted, 177 review`
 
 Detailed coverage and source-level status are documented in:
-- [`reports/knu_web_run_2026-04-05.md`](./reports/knu_web_run_2026-04-05.md)
-- [`out_knu_web/source_summary.md`](./out_knu_web/source_summary.md)
 
-The current best-possible state is: the system can run across all configured KNU sources and assign each one a final status, but not every official source currently yields a complete schedule.
+- [`out_knu_web/source_summary.md`](./out_knu_web/source_summary.md)
+- [`out_knu_web/source_summary.json`](./out_knu_web/source_summary.json)
+- [`out_knu_web/qa_report.json`](./out_knu_web/qa_report.json)
+- [`out_knu_web/qa_report.xlsx`](./out_knu_web/qa_report.xlsx)
+
+The current best-possible state is:
+
+- the system runs across all configured KNU sources
+- every source gets an explicit final status
+- low-quality rows are pushed to review instead of silently exported
+- some official sources are still blocked by the source itself or remain only partially parseable
 
 ## Quick Start
 
@@ -138,16 +135,42 @@ sources:
 ## Outputs
 
 - `out/<faculty>/<program>.xlsx`: normalized schedule workbooks exported in the template layout
-- `out/manifest.jsonl`: one JSON line per exported row with provenance, warnings, confidence, and content hash
-- `out/review_queue.xlsx`: low-confidence or incomplete rows that require manual review
+- `out/manifest.jsonl`: one JSON line per normalized row with provenance, warnings, confidence, and content hash
+- `out/review_queue.xlsx`: rows that failed QA or remained ambiguous after parsing
+- `out/qa_report.json`: machine-readable workbook QA summary
+- `out/qa_report.xlsx`: readable workbook QA summary
 - `out_knu_web/source_summary.md`: source-level status summary for the KNU web run
 - `out_knu_web/source_summary.json`: machine-readable source-level status summary
+
+## QA Rules / Правила якості
+
+Rows stay in exported Excel only if they have at least:
+
+- `day`
+- `start_time`
+- `end_time`
+- `subject`
+
+Rows are moved to review if they show signs of:
+
+- mixed columns inside `subject`
+- room, link, or teacher text still embedded into the wrong field
+- OCR or PDF garbage
+- fragmented PDF slot parsing
+- missing required fields
+
+Additional guarantees in the current pipeline:
+
+- `week_type` is always filled; if no reliable week marker exists, the default is `Обидва`
+- `week_source` is preserved in normalized data
+- `run` cleans the target output directory before writing a new result set
 
 ## OCR Requirements
 
 The PDF pipeline uses Tesseract with `ukr` and `eng` language data.
 
 Expected stack:
+
 - `pytesseract`
 - `pypdfium2`
 - local Tesseract binary available on `PATH`
@@ -159,15 +182,20 @@ Use:
 python -m timetable_scraper doctor
 ```
 
-If OCR dependencies are missing, `doctor` should fail explicitly and `run` should not silently continue with incomplete OCR support.
+If OCR dependencies are missing, `doctor` fails explicitly and `run` should not continue with incomplete OCR support.
 
 ## Known Limitations
 
-- Some official sources return `HTTP 500`.
-- Some official sources are blocked by `403 / Cloudflare`.
-- Some public storage links, especially OneDrive-based sources, may block public download.
-- Some published PDF or linked assets do not yield complete rows even after text extraction and OCR.
-- The scraper is KNU-first and coverage is intentionally reported honestly as `parsed` or `confirmed-blocker`; it does not force low-quality output for blocked sources.
+- Some official sources still return `HTTP 500`
+- Some official sources are blocked by `403 / Cloudflare`
+- Some public storage links, especially OneDrive-based sources, block anonymous download
+- Some PDFs still parse only partially and therefore produce more review rows than accepted rows
+- `review-only` status means the source was reached, but the current parser could not extract a reliable final timetable without lowering quality thresholds
+
+Current non-parsed KNU statuses:
+
+- `confirmed-blocker`: `CSC`, `Law`, `Military`, `IIR`
+- `review-only`: `Philology`
 
 ## Development and Tests
 

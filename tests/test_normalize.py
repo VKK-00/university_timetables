@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from timetable_scraper.normalize import map_headers, normalize_record, records_from_tabular_rows, score_record
 from timetable_scraper.models import DiscoveredAsset, FetchedAsset, NormalizedRow, ParsedDocument, RawRecord
-from timetable_scraper.qa import partition_rows
+from timetable_scraper.qa import partition_rows, refine_group_quality
 from timetable_scraper.utils import clean_numeric_artifact, flatten_multiline, parse_time_value
 
 
@@ -323,3 +323,207 @@ def test_partition_rows_marks_long_mixed_subject_for_review() -> None:
     assert not accepted
     assert len(review) == 1
     assert "inconsistent_columns" in review[0].qa_flags
+
+
+def test_partition_rows_keeps_english_subject_titles() -> None:
+    row = NormalizedRow(
+        program="Demo",
+        faculty="Соціологія",
+        week_type="Обидва",
+        day="Понеділок",
+        start_time="12:30",
+        end_time="13:50",
+        subject="GENDER ORDER TRANSFORMATION IN",
+        teacher="доц. БАБЕНКО С.С.",
+        confidence=0.98,
+    )
+    accepted, review = partition_rows([row], threshold=0.74)
+    assert len(accepted) == 1
+    assert not review
+
+
+def test_normalize_record_can_infer_subject_from_notes_after_cleanup() -> None:
+    asset = DiscoveredAsset(
+        source_name="fixture",
+        source_kind="zip",
+        source_url_or_path="fixtures.zip",
+        asset_kind="zip_entry",
+        locator="fixtures.zip::demo.xlsx",
+        display_name="demo.xlsx",
+    )
+    fetched = FetchedAsset(asset=asset, content=b"", content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", content_hash="abc", resolved_locator="demo.xlsx")
+    record = RawRecord(
+        values={
+            "program": "Demo",
+            "faculty": "FIT",
+            "day": "Понеділок",
+            "start_time": "09:00",
+            "end_time": "10:20",
+            "teacher": "Жабська Є. О.",
+            "notes": "T=11; Комп’ютерна графіка та візуалізація",
+        },
+        row_index=5,
+        sheet_name="1 курс",
+        raw_excerpt="Комп’ютерна графіка та візуалізація",
+    )
+    row = normalize_record(record, document=ParsedDocument(asset=fetched, sheets=[]))
+    assert row.subject == "Комп’ютерна графіка та візуалізація"
+    assert row.notes == "T=11"
+
+
+def test_normalize_record_extracts_teacher_from_split_subject_segments() -> None:
+    asset = DiscoveredAsset(
+        source_name="fixture",
+        source_kind="web_page",
+        source_url_or_path="https://example.edu/schedule",
+        asset_kind="file_url",
+        locator="https://example.edu/1.pdf",
+        display_name="1.pdf",
+    )
+    fetched = FetchedAsset(asset=asset, content=b"", content_type="application/pdf", content_hash="abc", resolved_locator="1.pdf")
+    record = RawRecord(
+        values={
+            "program": "Demo",
+            "faculty": "Філософський факультет",
+            "day": "П'ятниця",
+            "start_time": "16:20",
+            "end_time": "17:40",
+            "subject": "Англ. мова / Даниліна / С.Ю. / 408",
+            "teacher": "Доц",
+        },
+        row_index=5,
+        sheet_name="pdf-table",
+        raw_excerpt="Англ. мова / Даниліна / С.Ю. / 408",
+    )
+    row = normalize_record(record, document=ParsedDocument(asset=fetched, sheets=[]))
+    assert row.subject == "Англ. мова"
+    assert "Даниліна С.Ю." in row.teacher
+    assert row.room == "ауд. 408"
+
+
+def test_normalize_record_extracts_trailing_room_from_subject_tail() -> None:
+    asset = DiscoveredAsset(
+        source_name="fixture",
+        source_kind="web_page",
+        source_url_or_path="https://example.edu/schedule",
+        asset_kind="file_url",
+        locator="https://example.edu/1.pdf",
+        display_name="1.pdf",
+    )
+    fetched = FetchedAsset(asset=asset, content=b"", content_type="application/pdf", content_hash="abc", resolved_locator="1.pdf")
+    record = RawRecord(
+        values={
+            "program": "Demo",
+            "faculty": "Geo",
+            "day": "Понеділок",
+            "start_time": "08:30",
+            "end_time": "09:50",
+            "subject": "Іноземна мова (пр) / 406",
+            "teacher": "Дідковська Т.Л.",
+        },
+        row_index=5,
+        sheet_name="pdf-table",
+        raw_excerpt="Іноземна мова (пр) / 406",
+    )
+    row = normalize_record(record, document=ParsedDocument(asset=fetched, sheets=[]))
+    assert row.subject == "Іноземна мова (пр)"
+    assert row.room == "ауд. 406"
+
+
+def test_normalize_record_moves_meeting_codes_out_of_subject() -> None:
+    asset = DiscoveredAsset(
+        source_name="fixture",
+        source_kind="web_page",
+        source_url_or_path="https://example.edu/schedule",
+        asset_kind="file_url",
+        locator="https://example.edu/1.pdf",
+        display_name="1.pdf",
+    )
+    fetched = FetchedAsset(asset=asset, content=b"", content_type="application/pdf", content_hash="abc", resolved_locator="1.pdf")
+    record = RawRecord(
+        values={
+            "program": "Demo",
+            "faculty": "Geo",
+            "day": "Вівторок",
+            "start_time": "10:00",
+            "end_time": "11:20",
+            "subject": "ІК: 884 766 8136 КД:",
+            "teacher": "доц. Моташко Т.П.",
+        },
+        row_index=5,
+        sheet_name="pdf-table",
+        raw_excerpt="ІК: 884 766 8136 КД:",
+    )
+    row = normalize_record(record, document=ParsedDocument(asset=fetched, sheets=[]))
+    assert row.subject == ""
+    assert "ІК: 884 766 8136 КД:" in row.notes
+
+
+def test_partition_rows_moves_teacher_contamination_to_review() -> None:
+    row = NormalizedRow(
+        program="Demo",
+        faculty="Psy",
+        week_type="Обидва",
+        day="Вівторок",
+        start_time="14:30",
+        end_time="15:50",
+        subject="Базова загальновійськова підготовка",
+        teacher="ас.; Бутенко Н.В.; Проектний менеджмент в соціальній роботі (прак) . 406",
+        confidence=0.98,
+    )
+    accepted, review = partition_rows([row], threshold=0.74)
+    assert not accepted
+    assert len(review) == 1
+    assert "inconsistent_columns" in review[0].qa_flags
+
+
+def test_partition_rows_moves_pwd_fragment_subject_to_review() -> None:
+    row = NormalizedRow(
+        program="Geo Schedule",
+        faculty="Географічний факультет",
+        week_type="Обидва",
+        day="Середа",
+        start_time="08:30",
+        end_time="09:50",
+        subject="300?pwd=d2ZkMkxmYm5WdWIzcE",
+        confidence=0.98,
+    )
+    accepted, review = partition_rows([row], threshold=0.74)
+    assert not accepted
+    assert len(review) == 1
+    assert "garbage_text" in review[0].qa_flags
+
+
+def test_refine_group_quality_demotes_fragmented_pdf_slot_rows() -> None:
+    accepted = [
+        NormalizedRow(
+            program="Geo Schedule",
+            faculty="Географічний факультет",
+            week_type="Обидва",
+            day="Понеділок",
+            start_time="10:00",
+            end_time="11:20",
+            subject="Картографія",
+            sheet_name="pdf-table-p1-t1",
+            source_root_url="https://geo.knu.ua/navchannya/rozklad-zanyat/",
+            asset_locator="https://geo.knu.ua/file.pdf",
+            confidence=0.98,
+        ),
+        NormalizedRow(
+            program="Geo Schedule",
+            faculty="Географічний факультет",
+            week_type="Обидва",
+            day="Понеділок",
+            start_time="10:00",
+            end_time="11:20",
+            subject="з основами топографії (л)",
+            sheet_name="pdf-table-p1-t1",
+            source_root_url="https://geo.knu.ua/navchannya/rozklad-zanyat/",
+            asset_locator="https://geo.knu.ua/file.pdf",
+            confidence=0.98,
+        ),
+    ]
+    refined_accepted, review = refine_group_quality(accepted, [])
+    assert not refined_accepted
+    assert len(review) == 2
+    assert all("inconsistent_columns" in row.qa_flags for row in review)
