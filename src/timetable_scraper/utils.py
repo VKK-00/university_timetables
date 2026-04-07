@@ -73,14 +73,49 @@ SERVICE_TEXT_PATTERNS = (
     re.compile(r"(?iu)\bкод\s+доступу\b"),
     re.compile(r"(?iu)\bідентифікатор\s+конференції\b"),
     re.compile(r"(?iu)\bидентификатор\s+конференции\b"),
+    re.compile(r"(?iu)\b(?:в\.?\s*о\.?\s*)?декан(?:а)?\s+факультету\b"),
+    re.compile(r"(?iu)\bдиректор(?:а)?\s+інституту\b"),
+    re.compile(r"(?iu)\bпроректор(?:а)?\b"),
+    re.compile(r"(?iu)\bректор(?:а)?\b"),
+    re.compile(r"(?iu)\bтаблиця\s+\d+\b"),
+    re.compile(r"(?iu)\bрозгляд\s+та\s+затвердження\b"),
+    re.compile(r"(?iu)\bнавчально-методичн"),
+    re.compile(r"(?iu)\bстудентів\s+по\s+кафедрах\b"),
+    re.compile(r"(?iu)\bнавчальний\s+рік\s+за\s+спеціальністю\b"),
 )
 TECHNICAL_LABEL_PATTERNS = (
     re.compile(r"(?iu)^pdf(?:-table.*)?$"),
     re.compile(r"(?iu)^table-\d+$"),
     re.compile(r"(?iu)^page$"),
     re.compile(r"(?iu)^sheet\d+$"),
+    re.compile(r"(?iu)^лист\d+$"),
     re.compile(r"(?iu)^аркуш\d+$"),
     re.compile(r"(?iu)^переглянути$"),
+    re.compile(r"(?iu)^view(?:[_-].+)?$"),
+    re.compile(r"(?iu)^edit(?:[_-].+)?$"),
+    re.compile(r"(?iu)^gid[_=-]?\d+$"),
+)
+URLISH_TEXT_PATTERNS = (
+    re.compile(r"(?iu)\bhttps?\s*:\s*/\s*/"),
+    re.compile(r"(?iu)\bwww\.\S+"),
+    re.compile(r"(?iu)\b(?:docs|drive)\.google\.com\b"),
+    re.compile(r"(?iu)\bwp-content\b"),
+    re.compile(r"(?iu)\b(?:onedrive|1drv)\b"),
+)
+ADMIN_TEXT_PATTERNS = (
+    re.compile(r"(?iu)\b(?:в\.?\s*о\.?\s*)?декан(?:а)?\b"),
+    re.compile(r"(?iu)\bдиректор(?:а)?\b"),
+    re.compile(r"(?iu)\bпроректор(?:а)?\b"),
+    re.compile(r"(?iu)\bректор(?:а)?\b"),
+    re.compile(r"(?iu)\bзав(?:\.\s*|ідувач)"),
+)
+ROOMISH_SUBJECT_PATTERNS = (
+    re.compile(r"(?iu)^(?:л|л\.|лек|лекція|пр|пр\.|практ|лаб|лаб\.|сем|сем\.)$"),
+    re.compile(r"(?iu)^(?:кяф\s*)?\d{2,4}(?:,\d{2,4})?(?:\s*(?:л|л\.|лек|лекція|пр|пр\.|практ|лаб|лаб\.|сем|сем\.))?$"),
+    re.compile(r"(?iu)^(?:л|л\.|лек|лекція|пр|пр\.|практ|лаб|лаб\.|сем|сем\.)[, ]\s*\d{2,4}$"),
+    re.compile(r"(?iu)^лаб\.?\s*(?:кяф\s*)?\d{2,4}$"),
+    re.compile(r"(?iu)^\d{2,4}\s*/\s*(?:л|л\.|лек|лекція|пр|пр\.|практ|лаб|лаб\.|сем|сем\.)$"),
+    re.compile(r"(?iu)^(?:кяф|каф)\s*\d{2,4}$"),
 )
 KNOWN_SOURCE_LABELS = {
     "fit.knu.ua": "Факультет інформаційних технологій",
@@ -230,6 +265,27 @@ def looks_like_technical_label(value: Any) -> bool:
     return any(pattern.search(text) for pattern in TECHNICAL_LABEL_PATTERNS)
 
 
+def looks_like_urlish_text(value: Any) -> bool:
+    text = flatten_multiline(value)
+    if not text:
+        return False
+    return any(pattern.search(text) for pattern in URLISH_TEXT_PATTERNS)
+
+
+def looks_like_admin_text(value: Any) -> bool:
+    text = flatten_multiline(value)
+    if not text:
+        return False
+    return any(pattern.search(text) for pattern in ADMIN_TEXT_PATTERNS)
+
+
+def looks_like_roomish_subject_text(value: Any) -> bool:
+    text = normalize_service_tokens(value)
+    if not text:
+        return False
+    return any(pattern.fullmatch(text) for pattern in ROOMISH_SUBJECT_PATTERNS)
+
+
 def is_meaningful_label(value: Any) -> bool:
     text = flatten_multiline(value)
     lowered = text.casefold()
@@ -238,6 +294,8 @@ def is_meaningful_label(value: Any) -> bool:
     if lowered in {"невідома програма", "невідомий факультет", "sheet1", "аркуш1", "demo"}:
         return False
     if looks_like_storage_identifier(text):
+        return False
+    if looks_like_urlish_text(text):
         return False
     if looks_like_technical_label(text):
         return False
@@ -361,6 +419,29 @@ def infer_faculty_from_locator(locator: str) -> str:
     if len(parts) >= 2 and not looks_like_storage_identifier(parts[-2]):
         return parts[-2]
     return host or "Невідомий факультет"
+
+
+def infer_asset_label_from_locator(locator: str) -> str:
+    parsed = urlparse(locator)
+    candidates: list[str] = []
+    if parsed.scheme and parsed.netloc:
+        path_parts = [part for part in parsed.path.split("/") if part]
+        for part in reversed(path_parts):
+            lowered = part.casefold()
+            if lowered in {"view", "edit", "pubhtml", "export", "download", "file", "d"}:
+                continue
+            candidates.append(Path(part).stem)
+    else:
+        candidates.append(Path(locator).stem)
+
+    for candidate in candidates:
+        text = candidate.replace("_", " ").replace("-", " ")
+        text = re.sub(r"(?<=[A-Za-z])(?=[А-ЯІЇЄҐа-яіїєґ])", " ", text)
+        text = re.sub(r"(?<=[А-ЯІЇЄҐа-яіїєґ])(?=[A-Za-z])", " ", text)
+        text = normalize_whitespace(text)
+        if is_meaningful_label(text):
+            return text
+    return ""
 
 
 def truncate_sheet_title(value: str) -> str:

@@ -27,22 +27,22 @@
 
 Latest full KNU web run source of truth: April 7, 2026
 
-- `47594` accepted rows
-- `3245` review rows
+- `42905` accepted rows
+- `9062` review rows
 - `0` QA warnings
 - `0` QA failures
 
 Current source statuses:
 
-- `parsed`: `Geo`, `Econom`, `History`, `Mechmat`, `FIT`, `Psychology`, `REX`, `Sociology`, `Physics`, `Philosophy`, `Chemistry`, `IHT`, `Journalism`, `Geology`, `Biomed`
-- `confirmed-blocker`: `CSC`, `Law`, `Military`, `IIR`
+- `parsed`: `Geo`, `Econom`, `History`, `Mechmat`, `FIT`, `Psychology`, `REX`, `Sociology`, `Physics`, `Philosophy`, `Chemistry`, `Law`, `IHT`, `Journalism`, `Geology`, `Biomed`
+- `confirmed-blocker`: `CSC`, `Military`, `IIR`
 - `review-only`: `Philology`
 
 Largest parsed sources in the current run:
 
-- `FIT: 26794 accepted, 1047 review`
-- `Physics: 11214 accepted, 409 review`
-- `Sociology: 4107 accepted, 177 review`
+- `FIT: 26793 accepted, 1075 review`
+- `Physics: 6605 accepted, 5018 review`
+- `Sociology: 3937 accepted, 347 review`
 
 Detailed coverage and source-level status are documented in:
 
@@ -155,8 +155,10 @@ Rows are moved to review if they show signs of:
 
 - mixed columns inside `subject`
 - room, link, or teacher text still embedded into the wrong field
+- admin or service text embedded into schedule rows
 - OCR or PDF garbage
 - fragmented PDF slot parsing
+- implausible or broken time slots
 - missing required fields
 
 Additional guarantees in the current pipeline:

@@ -304,7 +304,7 @@ def test_partition_rows_marks_meeting_code_subject_for_review() -> None:
     accepted, review = partition_rows([row], threshold=0.74)
     assert not accepted
     assert len(review) == 1
-    assert "garbage_text" in review[0].qa_flags
+    assert any(flag in review[0].qa_flags for flag in ("garbage_text", "service_text_subject", "subject_contains_link"))
 
 
 def test_partition_rows_marks_long_mixed_subject_for_review() -> None:
@@ -527,3 +527,160 @@ def test_refine_group_quality_demotes_fragmented_pdf_slot_rows() -> None:
     assert not refined_accepted
     assert len(review) == 2
     assert all("inconsistent_columns" in row.qa_flags for row in review)
+
+
+def test_normalize_record_uses_note_program_hint_for_technical_source_label() -> None:
+    asset = DiscoveredAsset(
+        source_name="history-schedule",
+        source_kind="web_page",
+        source_url_or_path="https://history.univ.kiev.ua/studentam/schedule/",
+        asset_kind="pdf",
+        locator="https://drive.google.com/file/d/11PUXfSjYa15alOPW0fU7PvM5cs-ZQVB6/view?usp=drivesdk",
+        display_name="https: / / drive.google.com / file / d / 11PUXfSjYa15alOPW0fU7PvM5cs-ZQVB6 / view?usp=drivesdk",
+    )
+    fetched = FetchedAsset(asset=asset, content=b"", content_type="application/pdf", content_hash="abc", resolved_locator="history.pdf")
+    record = RawRecord(
+        values={
+            "faculty": "Історичний факультет",
+            "day": "Понеділок",
+            "start_time": "13:05",
+            "end_time": "14:25",
+            "subject": "Академічне письмо англійською мовою",
+            "notes": "032 Історія та археологія",
+        },
+        row_index=3,
+        sheet_name="pdf-table-p1-t1",
+        raw_excerpt="Академічне письмо англійською мовою",
+    )
+    row = normalize_record(record, document=ParsedDocument(asset=fetched, sheets=[]))
+    assert row.program == "032 Історія та археологія"
+
+
+def test_normalize_record_moves_trailing_program_codes_out_of_subject() -> None:
+    asset = DiscoveredAsset(
+        source_name="iht-schedule",
+        source_kind="web_page",
+        source_url_or_path="https://iht.knu.ua",
+        asset_kind="pdf",
+        locator="https://iht.knu.ua/wp-content/uploads/2026/02/RozkladННІВТ-2-25-26.pdf",
+        display_name="https: / / iht.knu.ua / wp-content / uploads / 2026 / 02 / RozkladННІВТ-2-25-26.pdf",
+    )
+    fetched = FetchedAsset(asset=asset, content=b"", content_type="application/pdf", content_hash="abc", resolved_locator="iht.pdf")
+    record = RawRecord(
+        values={
+            "day": "Вівторок",
+            "start_time": "09:00",
+            "end_time": "10:20",
+            "subject": "Професійне проектне управління науковими дослідженнями 102 Хімія",
+        },
+        row_index=3,
+        sheet_name="pdf-table-p1-t1",
+        raw_excerpt="Професійне проектне управління науковими дослідженнями 102 Хімія",
+    )
+    row = normalize_record(record, document=ParsedDocument(asset=fetched, sheets=[]))
+    assert row.program == "102 Хімія"
+    assert row.subject == "Професійне проектне управління науковими дослідженнями"
+    assert "102 Хімія" in row.notes
+
+
+def test_partition_rows_moves_admin_subject_to_review() -> None:
+    row = NormalizedRow(
+        program="Постійний",
+        faculty="Факультет психології",
+        week_type="Обидва",
+        day="П'ятниця",
+        start_time="17:30",
+        end_time="18:50",
+        subject="В.о. декана факультету психології Іван ДАНИЛЮК",
+        confidence=0.98,
+    )
+    accepted, review = partition_rows([row], threshold=0.74)
+    assert not accepted
+    assert len(review) == 1
+    assert "service_text_subject" in review[0].qa_flags
+
+
+def test_partition_rows_moves_roomish_subject_to_review() -> None:
+    row = NormalizedRow(
+        program="Лист1",
+        faculty="Фізичний факультет",
+        week_type="Обидва",
+        day="Понеділок",
+        start_time="10:35",
+        end_time="11:55",
+        subject="108 л",
+        confidence=0.98,
+    )
+    accepted, review = partition_rows([row], threshold=0.74)
+    assert not accepted
+    assert len(review) == 1
+    assert "subject_contains_room" in review[0].qa_flags
+
+
+def test_partition_rows_moves_implausible_time_to_review() -> None:
+    row = NormalizedRow(
+        program="Постійний",
+        faculty="Факультет психології",
+        week_type="Обидва",
+        day="Вівторок",
+        start_time="02:12",
+        end_time="03:32",
+        subject="День самостійної роботи",
+        confidence=0.98,
+    )
+    accepted, review = partition_rows([row], threshold=0.74)
+    assert not accepted
+    assert len(review) == 1
+    assert "implausible_time" in review[0].qa_flags
+
+
+def test_normalize_record_collapses_program_label_aliases() -> None:
+    asset = DiscoveredAsset(
+        source_name="psy-schedule",
+        source_kind="web_page",
+        source_url_or_path="https://psy.knu.ua/study/schedule",
+        asset_kind="xlsx",
+        locator="https://psy.knu.ua/uploads/psy.xlsx",
+        display_name="НАЧИТКА!!!.xlsx",
+    )
+    fetched = FetchedAsset(asset=asset, content=b"", content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", content_hash="abc", resolved_locator="psy.xlsx")
+    record = RawRecord(
+        values={
+            "program": "НАЧИТКА!!!",
+            "day": "Понеділок",
+            "start_time": "09:00",
+            "end_time": "10:20",
+            "subject": "Психологія розвитку",
+        },
+        row_index=3,
+        sheet_name="Лист1",
+        raw_excerpt="Психологія розвитку",
+    )
+    row = normalize_record(record, document=ParsedDocument(asset=fetched, sheets=[]))
+    assert row.program == "Начитка"
+
+
+def test_normalize_record_rejects_incomplete_program_hint_tail() -> None:
+    asset = DiscoveredAsset(
+        source_name="history-schedule",
+        source_kind="web_page",
+        source_url_or_path="https://history.univ.kiev.ua/studentam/schedule/",
+        asset_kind="pdf",
+        locator="https://drive.google.com/file/d/11PUXfSjYa15alOPW0fU7PvM5cs-ZQVB6/view?usp=drivesdk",
+        display_name="history.pdf",
+    )
+    fetched = FetchedAsset(asset=asset, content=b"", content_type="application/pdf", content_hash="abc", resolved_locator="history.pdf")
+    record = RawRecord(
+        values={
+            "day": "Середа",
+            "start_time": "14:40",
+            "end_time": "16:00",
+            "subject": "Цивілізаційні процеси в Європі 032 Історія та",
+        },
+        row_index=4,
+        sheet_name="pdf-table-p1-t1",
+        raw_excerpt="Цивілізаційні процеси в Європі 032 Історія та",
+    )
+    row = normalize_record(record, document=ParsedDocument(asset=fetched, sheets=[]))
+    assert row.subject == "Цивілізаційні процеси в Європі"
+    assert row.program != "032 Історія та"

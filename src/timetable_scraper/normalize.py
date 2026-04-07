@@ -16,9 +16,12 @@ from .utils import (
     contains_link_text,
     flatten_multiline,
     humanize_source_name,
+    infer_asset_label_from_locator,
     infer_faculty_from_locator,
+    looks_like_admin_text,
     looks_like_garbage_text,
     looks_like_room_text,
+    looks_like_roomish_subject_text,
     looks_like_service_text,
     looks_like_teacher_text,
     normalize_day,
@@ -70,6 +73,19 @@ INFORMATIONAL_NOTE_PATTERNS = (
     "з'явиться пізніше",
     "з`явиться пізніше",
 )
+PROGRAM_LABEL_ALIASES = {
+    "начитка!": "Начитка",
+    "начитка!!!": "Начитка",
+    "начитка": "Начитка",
+    "начітка": "Начитка",
+    "постійний!!!": "Постійний",
+    "постійний": "Постійний",
+    "постіиний": "Постійний",
+    "постіиниии": "Постійний",
+    "постійне": "Постійне",
+    "постійний розклад": "Постійний розклад",
+    "постiйний розклад": "Постійний розклад",
+}
 
 FILL_DOWN_FIELDS = ("week_type", "day", "start_time", "end_time")
 DEFAULT_SLOT_DURATION_MINUTES = 80
@@ -82,8 +98,15 @@ CODE_SEGMENT_RE = re.compile(r"(?iu)^(?:meeting id|passcode|код доступ�
 TRAILING_ROOM_RE = re.compile(
     r"(?iu)^(?P<subject>.+?)(?:\s*/\s*|\s+)(?P<room>(?:\d{3,4}[А-ЯІЇЄҐA-Z]?|[А-ЯІЇЄҐA-Z]-?\d{2,4}|(?:хімічний|географічний)\s+ф-?т\s+\d{2,4}))$"
 )
+PROGRAM_FRAGMENT_RE = re.compile(r"(?iu)\s+(?P<trailing>(?:(?:0\d{2}|1\d{2}|E\d)\s+.+))$")
 MEETING_NOTE_RE = re.compile(r"(?iu)\b(?:meeting id|passcode|код доступу|ідентифікатор конференції|идентификатор конференции)\b")
 MEETING_ABBR_RE = re.compile(r"(?iu)^(?:ік|кд|id|pwd)\s*:")
+LESSON_TYPE_PATTERNS = (
+    (re.compile(r"(?iu)\b(?:л|л\.|лек|лекція)\b"), "лекція"),
+    (re.compile(r"(?iu)\b(?:пр|пр\.|практ|практична)\b"), "практична"),
+    (re.compile(r"(?iu)\b(?:лаб|лаб\.|лабораторна)\b"), "лабораторна"),
+    (re.compile(r"(?iu)\b(?:сем|сем\.)\b"), "семінар"),
+)
 
 
 def map_headers(headers: list[Any]) -> dict[str, int]:
@@ -226,13 +249,18 @@ def normalize_record(record: RawRecord, *, document: ParsedDocument) -> Normaliz
         fallback="Невідомий факультет",
     )
     display_stem = Path(flatten_multiline(source_asset.display_name) or source_label).stem
+    note_program_hint = _extract_program_hint(cleaned_fields["notes"])
+    asset_label = infer_asset_label_from_locator(source_asset.locator)
     program = coalesce_label(
         cleaned_fields["program"],
+        note_program_hint,
         record.sheet_name,
         display_stem,
+        asset_label,
         source_label,
         fallback="Невідома програма",
     )
+    program = _normalize_program_label(program)
 
     return NormalizedRow(
         program=program,
@@ -355,6 +383,58 @@ def _normalize_non_class_subject(value: Any) -> str:
 def _looks_like_informational_note(value: Any) -> bool:
     text = flatten_multiline(value).casefold()
     return bool(text) and any(pattern in text for pattern in INFORMATIONAL_NOTE_PATTERNS)
+
+
+def _extract_program_hint(notes: str) -> str:
+    segments = _split_segments(notes)
+    for index, segment in enumerate(segments):
+        cleaned = normalize_service_tokens(segment)
+        if not cleaned:
+            continue
+        if (
+            contains_link_text(cleaned)
+            or looks_like_teacher_text(cleaned)
+            or looks_like_room_text(cleaned)
+            or looks_like_service_text(cleaned)
+            or looks_like_garbage_text(cleaned)
+        ):
+            continue
+        if re.fullmatch(r"(?iu)(?:0\d{2}|1\d{2}|E\d)\s+.+", cleaned):
+            if len(re.findall(r"(?iu)\b(?:0\d{2}|1\d{2}|E\d)\b", cleaned)) > 1:
+                continue
+            if cleaned.casefold().endswith((" та", " і", " й", " з", " до", " по")):
+                continuation = ""
+                if index + 1 < len(segments):
+                    continuation = normalize_service_tokens(segments[index + 1])
+                elif index > 0:
+                    continuation = normalize_service_tokens(segments[index - 1])
+                if continuation and _looks_like_program_continuation(continuation):
+                    cleaned = f"{cleaned} {continuation}"
+            if cleaned.casefold().endswith((" та", " і", " й", " з", " до", " по")):
+                continue
+            return cleaned
+    return ""
+
+
+def _normalize_program_label(value: str) -> str:
+    cleaned = normalize_service_tokens(value).replace("_", " ").replace("-", " ")
+    cleaned = re.sub(r"(?<=[A-Za-z])(?=[А-ЯІЇЄҐа-яіїєґ])", " ", cleaned)
+    cleaned = re.sub(r"(?<=[А-ЯІЇЄҐа-яіїєґ])(?=[A-Za-z])", " ", cleaned)
+    cleaned = normalize_service_tokens(cleaned).strip(" !.,;:-")
+    if not cleaned:
+        return ""
+    return PROGRAM_LABEL_ALIASES.get(cleaned.casefold(), cleaned)
+
+
+def _looks_like_program_continuation(value: str) -> bool:
+    cleaned = normalize_service_tokens(value)
+    if not cleaned:
+        return False
+    if contains_link_text(cleaned) or looks_like_teacher_text(cleaned) or looks_like_room_text(cleaned):
+        return False
+    if looks_like_service_text(cleaned) or looks_like_garbage_text(cleaned):
+        return False
+    return bool(re.fullmatch(r"(?iu)[А-ЯІЇЄҐа-яіїєґ][А-ЯІЇЄҐа-яіїєґ'’\-\s]{2,}", cleaned))
 
 
 def _infer_missing_time_bounds(start_time: str, end_time: str, values: dict[str, Any]) -> tuple[str, str]:
@@ -522,6 +602,18 @@ def _postprocess_structured_fields(cleaned_fields: dict[str, str]) -> dict[str, 
         updated["room"] = _merge_unique([updated["room"], trailing_room])
     if trailing_notes:
         updated["notes"] = _merge_unique([updated["notes"], *trailing_notes])
+    updated["subject"], trailing_program_notes = _peel_subject_program_metadata(updated["subject"])
+    if trailing_program_notes:
+        updated["notes"] = _merge_unique([updated["notes"], *trailing_program_notes])
+    if looks_like_roomish_subject_text(updated["subject"]):
+        updated["subject"], room_fragment, lesson_fragment = _extract_roomish_subject_metadata(updated["subject"])
+        if room_fragment:
+            updated["room"] = _merge_unique([updated["room"], room_fragment])
+        if lesson_fragment and not updated["lesson_type"]:
+            updated["lesson_type"] = lesson_fragment
+    if updated["subject"] and looks_like_admin_text(updated["subject"]):
+        updated["notes"] = _merge_unique([updated["notes"], updated["subject"]])
+        updated["subject"] = ""
     if MEETING_NOTE_RE.search(updated["subject"]) or MEETING_ABBR_RE.search(updated["subject"]):
         updated["notes"] = _merge_unique([updated["notes"], updated["subject"]])
         updated["subject"] = ""
@@ -604,6 +696,39 @@ def _peel_subject_tail_metadata(subject: str) -> tuple[str, str, list[str]]:
     subject_part, trailing_room = _extract_trailing_room_from_subject(subject_part)
     room_value = _merge_unique([room_part, trailing_room])
     return subject_part, room_value, note_parts
+
+
+def _peel_subject_program_metadata(subject: str) -> tuple[str, list[str]]:
+    cleaned = normalize_service_tokens(subject)
+    if not cleaned or len(cleaned) < 10:
+        return cleaned, []
+    match = PROGRAM_FRAGMENT_RE.search(cleaned)
+    if not match:
+        return cleaned, []
+    subject_part = normalize_service_tokens(cleaned[: match.start("trailing")]).strip(" /,;")
+    trailing = normalize_service_tokens(match.group("trailing"))
+    if len(subject_part) < 6:
+        return cleaned, []
+    if not re.search(r"(?iu)\b(?:0\d{2}|1\d{2}|E\d)\b", trailing):
+        return cleaned, []
+    return subject_part, [trailing]
+
+
+def _extract_roomish_subject_metadata(subject: str) -> tuple[str, str, str]:
+    cleaned = normalize_service_tokens(subject)
+    if not cleaned:
+        return "", "", ""
+    lesson_type = ""
+    residual = cleaned
+    for pattern, canonical in LESSON_TYPE_PATTERNS:
+        if pattern.search(residual):
+            lesson_type = canonical
+            residual = pattern.sub(" ", residual)
+            break
+    residual = normalize_service_tokens(residual).strip(" ,;/")
+    if not residual:
+        return "", "", lesson_type
+    return "", _normalize_room_segment(residual), lesson_type
 
 
 def _infer_subject_from_notes(cleaned_fields: dict[str, str]) -> tuple[dict[str, str], bool]:

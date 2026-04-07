@@ -12,9 +12,11 @@ from .utils import (
     contains_link_text,
     ensure_parent,
     json_dumps,
+    looks_like_admin_text,
     looks_like_technical_label,
     looks_like_garbage_text,
     looks_like_room_text,
+    looks_like_roomish_subject_text,
     looks_like_service_text,
     looks_like_teacher_text,
 )
@@ -32,6 +34,8 @@ HARD_FAIL_FLAGS = {
     "teacher_too_long",
     "garbage_text",
     "inconsistent_columns",
+    "implausible_time",
+    "service_text_subject",
 }
 LESSON_TEXT_RE = re.compile(r"(?iu)\((?:лек|прак|сем|лаб|lek|sem|prac)")
 TRAILING_ROOM_RE = re.compile(r"(?iu)(?:\s*/\s*|\s+)(?:\d{3,4}[А-ЯІЇЄҐA-Z]?|[А-ЯІЇЄҐA-Z]-?\d{2,4}|(?:хімічний|географічний)\s+ф-?т\s+\d{2,4})$")
@@ -98,12 +102,16 @@ def analyze_row_quality(row: NormalizedRow) -> NormalizedRow:
         flags.append("missing_subject")
     if subject and looks_like_room_text(subject):
         flags.append("subject_contains_room")
+    if subject and looks_like_roomish_subject_text(subject):
+        flags.append("subject_contains_room")
     if subject and TRAILING_ROOM_RE.search(subject):
         flags.append("subject_contains_room")
     if subject and looks_like_teacher_text(subject):
         flags.append("subject_contains_teacher")
     if subject and contains_link_text(subject):
         flags.append("subject_contains_link")
+    if subject and looks_like_admin_text(subject):
+        flags.append("service_text_subject")
     if subject and len(subject) > 140:
         flags.append("subject_too_long")
     if row.teacher and len(row.teacher) > 180:
@@ -111,7 +119,7 @@ def analyze_row_quality(row: NormalizedRow) -> NormalizedRow:
     if row.teacher and (LESSON_TEXT_RE.search(row.teacher) or re.search(r"\b\d{3,4}\b", row.teacher) or re.search(r"\b\d{1,2}[.:]\d{2}\b", row.teacher)):
         flags.append("inconsistent_columns")
     if subject and looks_like_service_text(subject):
-        flags.append("garbage_text")
+        flags.append("service_text_subject")
     if subject and looks_like_garbage_text(subject):
         flags.append("garbage_text")
     if subject and any(token in subject.casefold() for token in ("?pwd=", "?p=", ".us")):
@@ -123,6 +131,10 @@ def analyze_row_quality(row: NormalizedRow) -> NormalizedRow:
     if subject and ("-----" in subject or "––––" in subject or "лек....." in subject or "практ....." in subject):
         flags.append("inconsistent_columns")
     if row.teacher and ("лек" in row.teacher.casefold() or "практ" in row.teacher.casefold() or row.teacher.count(";") >= 5):
+        flags.append("inconsistent_columns")
+    if row.notes and len(row.notes) > 240:
+        flags.append("inconsistent_columns")
+    if row.notes and len(row.notes) > 80 and looks_like_service_text(row.notes):
         flags.append("inconsistent_columns")
     if subject and subject.startswith("="):
         flags.append("garbage_text")
@@ -144,6 +156,8 @@ def analyze_row_quality(row: NormalizedRow) -> NormalizedRow:
         flags.append("garbage_text")
     if subject and " " not in subject and re.fullmatch(r"[A-Za-z0-9=._-]{10,}", subject):
         flags.append("garbage_text")
+    if _has_implausible_time(row.start_time, row.end_time):
+        flags.append("implausible_time")
 
     severity = "none"
     if any(flag in HARD_FAIL_FLAGS for flag in flags):
@@ -170,6 +184,25 @@ def _looks_like_fragment_subject(subject: str) -> bool:
         return True
     if re.fullmatch(r"\([^)]{1,12}\)\s*\d{1,4}", stripped):
         return True
+    return False
+
+
+def _has_implausible_time(start_time: str, end_time: str) -> bool:
+    bounds = []
+    for value in (start_time, end_time):
+        if not value or ":" not in value:
+            continue
+        try:
+            hours, minutes = (int(part) for part in value.split(":", 1))
+        except ValueError:
+            return True
+        bounds.append(hours * 60 + minutes)
+    if any(minutes < 7 * 60 or minutes > 22 * 60 + 30 for minutes in bounds):
+        return True
+    if len(bounds) == 2:
+        duration = bounds[1] - bounds[0]
+        if duration < 30 or duration > 240:
+            return True
     return False
 
 
@@ -221,16 +254,22 @@ def _audit_single_workbook(path: Path) -> WorkbookQaSummary:
                 non_class_rows += 1
             if subject and looks_like_room_text(subject):
                 issue_counter["subject_contains_room"] += 1
+            if subject and looks_like_roomish_subject_text(subject):
+                issue_counter["subject_contains_room"] += 1
             if subject and looks_like_teacher_text(subject):
                 issue_counter["subject_contains_teacher"] += 1
             if subject and contains_link_text(subject):
                 issue_counter["subject_contains_link"] += 1
+            if subject and looks_like_admin_text(subject):
+                issue_counter["service_text_subject"] += 1
             if subject and looks_like_garbage_text(subject):
                 issue_counter["garbage_text"] += 1
             if subject and len(subject) > 140:
                 issue_counter["subject_too_long"] += 1
             if teacher and len(teacher) > 180:
                 issue_counter["teacher_too_long"] += 1
+            if _has_implausible_time(start_time, end_time):
+                issue_counter["implausible_time"] += 1
         if row_count == 0:
             issue_counter["empty_sheet"] += 1
         elif row_count == 1 and looks_like_technical_label(path.stem):
