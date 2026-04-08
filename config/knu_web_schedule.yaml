@@ -3,6 +3,7 @@ output_dir: ../out_knu_web
 cache_dir: ../.cache/timetable_scraper_knu_web
 confidence_threshold: 0.74
 ocr_enabled: true
+manual_assets_path: manual_assets.yaml
 sources:
   - name: geo-schedule
     kind: web_page
@@ -43,7 +44,7 @@ sources:
     follow_links_depth: 0
   - name: csc-schedule
     kind: web_page
-    url: https://csc.knu.ua/uk/schedule/
+    url: https://www.csc.knu.ua/en/schedule
     allow_domains:
       - csc.knu.ua
       - www.csc.knu.ua

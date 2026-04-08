@@ -4,6 +4,7 @@ from timetable_scraper.utils import (
     infer_asset_label_from_locator,
     looks_like_garbage_text,
     looks_like_roomish_subject_text,
+    looks_like_technical_label,
     looks_like_urlish_text,
     normalize_day,
     parse_time_range,
@@ -32,7 +33,13 @@ def test_urlish_text_and_asset_label_detection() -> None:
     assert infer_asset_label_from_locator("https://iht.knu.ua/wp-content/uploads/2026/02/RozkladННІВТ-2-25-26.pdf") == "Rozklad ННІВТ 2 25 26"
 
 
+def test_technical_label_detection_rejects_storage_query_tails() -> None:
+    assert looks_like_technical_label("view?usp=drivesdk")
+    assert looks_like_technical_label("edit?usp=sharing")
+
+
 def test_roomish_subject_detection_supports_room_fragments() -> None:
     assert looks_like_roomish_subject_text("404 пр.")
     assert looks_like_roomish_subject_text("лаб.КЯФ 39")
     assert looks_like_roomish_subject_text("пр")
+    assert looks_like_roomish_subject_text("113 ауд.")

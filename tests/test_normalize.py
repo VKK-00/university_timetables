@@ -459,6 +459,81 @@ def test_normalize_record_moves_meeting_codes_out_of_subject() -> None:
     assert "ІК: 884 766 8136 КД:" in row.notes
 
 
+def test_normalize_record_does_not_infer_abbreviated_subject_from_notes() -> None:
+    asset = DiscoveredAsset(
+        source_name="fit-schedule",
+        source_kind="google_sheet",
+        source_url_or_path="https://fit.knu.ua/for-students/lessons-schedule",
+        asset_kind="google_sheet",
+        locator="https://docs.google.com/spreadsheets/d/test/edit#gid=0",
+        display_name="fit.xlsx",
+    )
+    fetched = FetchedAsset(
+        asset=asset,
+        content=b"",
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        content_hash="fit",
+        resolved_locator="fit.xlsx",
+    )
+    record = RawRecord(
+        values={
+            "program": "ІР, ВЕБ, ІРма",
+            "faculty": "Факультет інформаційних технологій",
+            "day": "П'ятниця",
+            "start_time": "09:00",
+            "end_time": "10:20",
+            "notes": "Ст.",
+            "teacher": "Михальчук В.В.",
+            "room": "307 ауд.",
+        },
+        row_index=5,
+        sheet_name="ІР, ВЕБ, ІРма",
+        raw_excerpt="Ст.",
+    )
+
+    row = normalize_record(record, document=ParsedDocument(asset=fetched, sheets=[]))
+
+    assert row.subject == ""
+    assert "missing_subject" in row.warnings
+
+
+def test_normalize_record_normalizes_trailing_auditory_room_format() -> None:
+    asset = DiscoveredAsset(
+        source_name="fit-schedule",
+        source_kind="google_sheet",
+        source_url_or_path="https://fit.knu.ua/for-students/lessons-schedule",
+        asset_kind="google_sheet",
+        locator="https://docs.google.com/spreadsheets/d/test/edit#gid=0",
+        display_name="fit.xlsx",
+    )
+    fetched = FetchedAsset(
+        asset=asset,
+        content=b"",
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        content_hash="fit",
+        resolved_locator="fit.xlsx",
+    )
+    record = RawRecord(
+        values={
+            "program": "ІПЗ, ІПЗм",
+            "faculty": "Факультет інформаційних технологій",
+            "day": "Понеділок",
+            "start_time": "09:00",
+            "end_time": "10:20",
+            "subject": "Архітектура комп'ютера",
+            "teacher": "Вовна О. В.",
+            "room": "203 ауд.",
+        },
+        row_index=5,
+        sheet_name="ІПЗ, ІПЗм",
+        raw_excerpt="Архітектура комп'ютера",
+    )
+
+    row = normalize_record(record, document=ParsedDocument(asset=fetched, sheets=[]))
+
+    assert row.room == "ауд. 203"
+
+
 def test_partition_rows_moves_teacher_contamination_to_review() -> None:
     row = NormalizedRow(
         program="Demo",
@@ -489,6 +564,25 @@ def test_partition_rows_moves_pwd_fragment_subject_to_review() -> None:
         confidence=0.98,
     )
     accepted, review = partition_rows([row], threshold=0.74)
+    assert not accepted
+    assert len(review) == 1
+    assert "garbage_text" in review[0].qa_flags
+
+
+def test_partition_rows_moves_abbreviated_subject_to_review() -> None:
+    row = NormalizedRow(
+        program="ІР, ВЕБ, ІРма",
+        faculty="Факультет інформаційних технологій",
+        week_type="Обидва",
+        day="П'ятниця",
+        start_time="09:00",
+        end_time="10:20",
+        subject="Ст.",
+        confidence=0.98,
+    )
+
+    accepted, review = partition_rows([row], threshold=0.74)
+
     assert not accepted
     assert len(review) == 1
     assert "garbage_text" in review[0].qa_flags
@@ -617,6 +711,23 @@ def test_partition_rows_moves_roomish_subject_to_review() -> None:
     assert "subject_contains_room" in review[0].qa_flags
 
 
+def test_partition_rows_moves_auditory_fragment_subject_to_review() -> None:
+    row = NormalizedRow(
+        program="ІПЗ, ІПЗм",
+        faculty="Факультет інформаційних технологій",
+        week_type="Обидва",
+        day="Вівторок",
+        start_time="12:10",
+        end_time="13:30",
+        subject="113 ауд.",
+        confidence=0.98,
+    )
+    accepted, review = partition_rows([row], threshold=0.74)
+    assert not accepted
+    assert len(review) == 1
+    assert "subject_contains_room" in review[0].qa_flags
+
+
 def test_partition_rows_moves_implausible_time_to_review() -> None:
     row = NormalizedRow(
         program="Постійний",
@@ -632,6 +743,22 @@ def test_partition_rows_moves_implausible_time_to_review() -> None:
     assert not accepted
     assert len(review) == 1
     assert "implausible_time" in review[0].qa_flags
+
+
+def test_partition_rows_keeps_extended_qualification_work_slot() -> None:
+    row = NormalizedRow(
+        program="Лист1",
+        faculty="Фізичний факультет",
+        week_type="Обидва",
+        day="П'ятниця",
+        start_time="08:40",
+        end_time="13:55",
+        subject="Кваліфікаційна робота магістра",
+        confidence=0.98,
+    )
+    accepted, review = partition_rows([row], threshold=0.74)
+    assert len(accepted) == 1
+    assert not review
 
 
 def test_normalize_record_collapses_program_label_aliases() -> None:
@@ -684,3 +811,71 @@ def test_normalize_record_rejects_incomplete_program_hint_tail() -> None:
     row = normalize_record(record, document=ParsedDocument(asset=fetched, sheets=[]))
     assert row.subject == "Цивілізаційні процеси в Європі"
     assert row.program != "032 Історія та"
+
+
+def test_normalize_record_recovers_program_hint_from_neighboring_note_segment() -> None:
+    asset = DiscoveredAsset(
+        source_name="history-schedule",
+        source_kind="web_page",
+        source_url_or_path="https://history.univ.kiev.ua/studentam/schedule/",
+        asset_kind="pdf",
+        locator="https://drive.google.com/file/d/11PUXfSjYa15alOPW0fU7PvM5cs-ZQVB6/view?usp=drivesdk",
+        display_name="view?usp=drivesdk",
+    )
+    fetched = FetchedAsset(asset=asset, content=b"", content_type="application/pdf", content_hash="abc", resolved_locator="history.pdf")
+    record = RawRecord(
+        values={
+            "faculty": "Історичний факультет",
+            "day": "Середа",
+            "start_time": "14:40",
+            "end_time": "16:00",
+            "subject": "Цивілізаційні процеси в Європі 032 Історія та",
+            "teacher": "Конта Р.М.; проф",
+            "notes": "археологія ; д.і.н., .; 032 Історія та",
+        },
+        row_index=4,
+        sheet_name="pdf-table-p1-t1",
+        raw_excerpt="https://drive.google.com/file/d/11PUXfSjYa15alOPW0fU7PvM5cs-ZQVB6/view?usp=drivesdk | Історичний факультет | Середа | 14:40 | 16:00 | Цивілізаційні процеси в Європі 032 Історія та археологія ; проф. Конта Р.М.",
+    )
+    row = normalize_record(record, document=ParsedDocument(asset=fetched, sheets=[]))
+    assert row.subject == "Цивілізаційні процеси в Європі"
+    assert row.program == "032 Історія та археологія"
+
+
+def test_normalize_record_moves_lesson_and_subject_fragments_out_of_teacher_field() -> None:
+    asset = DiscoveredAsset(
+        source_name="fit-schedule",
+        source_kind="google_sheet",
+        source_url_or_path="https://fit.knu.ua/for-students/lessons-schedule",
+        asset_kind="google_sheet",
+        locator="https://docs.google.com/spreadsheets/d/test/edit#gid=0",
+        display_name="fit.xlsx",
+    )
+    fetched = FetchedAsset(
+        asset=asset,
+        content=b"",
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        content_hash="fit",
+        resolved_locator="fit.xlsx",
+    )
+    record = RawRecord(
+        values={
+            "program": "\u0406\u041f\u0417, \u0406\u041f\u0417\u043c",
+            "faculty": "\u0424\u0430\u043a\u0443\u043b\u044c\u0442\u0435\u0442 \u0456\u043d\u0444\u043e\u0440\u043c\u0430\u0446\u0456\u0439\u043d\u0438\u0445 \u0442\u0435\u0445\u043d\u043e\u043b\u043e\u0433\u0456\u0439",
+            "day": "\u041f\u043e\u043d\u0435\u0434\u0456\u043b\u043e\u043a",
+            "start_time": "13:40",
+            "end_time": "15:00",
+            "subject": "\u0412\u0435\u0440\u0438\u0444\u0456\u043a\u0430\u0446\u0456\u044f \u0442\u0430 \u0432\u0430\u043b\u0456\u0434\u0430\u0446\u0456\u044f \u043f\u0440\u043e\u0433\u0440\u0430\u043c\u043d\u0438\u0445 \u0441\u0438\u0441\u0442\u0435\u043c",
+            "teacher": "\u0406\u0432\u0430\u043d\u043e\u0432 \u0404. \u0412. ; (\u043b\u0430\u0431) ; \u0421\u0443\u0447\u0430\u0441\u043d\u0456 \u0431\u0430\u0437\u0438 \u0434\u0430\u043d\u0438\u0445 (\u041b) 8\u0442",
+        },
+        row_index=5,
+        sheet_name="\u0406\u041f\u0417, \u0406\u041f\u0417\u043c",
+        raw_excerpt="fit composite teacher",
+    )
+
+    row = normalize_record(record, document=ParsedDocument(asset=fetched, sheets=[]))
+
+    assert "\u0406\u0432\u0430\u043d\u043e\u0432" in row.teacher
+    assert "\u043b\u0430\u0431" not in row.teacher.casefold()
+    assert "\u0421\u0443\u0447\u0430\u0441\u043d\u0456 \u0431\u0430\u0437\u0438 \u0434\u0430\u043d\u0438\u0445" not in row.teacher
+    assert "\u0421\u0443\u0447\u0430\u0441\u043d\u0456 \u0431\u0430\u0437\u0438 \u0434\u0430\u043d\u0438\u0445" in row.notes

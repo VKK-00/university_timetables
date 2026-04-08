@@ -15,6 +15,14 @@ class SourceConfig:
     allow_domains: list[str] = field(default_factory=list)
     schedule_keywords: list[str] = field(default_factory=list)
     follow_links_depth: int = 0
+    manual_assets: list["ManualAssetSeed"] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class ManualAssetSeed:
+    url: str
+    display_name: str = ""
+    asset_kind: str = "file_url"
 
 
 @dataclass(slots=True)
@@ -25,6 +33,7 @@ class AppConfig:
     confidence_threshold: float
     ocr_enabled: bool
     sources: list[SourceConfig]
+    manual_assets_path: Path | None = None
 
 
 @dataclass(slots=True)
@@ -140,11 +149,13 @@ class SourceRunSummary:
     status: str
     accepted_rows: int = 0
     review_rows: int = 0
+    autofix_rows: int = 0
     discovered_assets: int = 0
     attempted_assets: int = 0
     discovery_issues: list[str] = field(default_factory=list)
     runtime_issues: list[str] = field(default_factory=list)
     top_review_warnings: list[str] = field(default_factory=list)
+    top_review_qa_flags: list[str] = field(default_factory=list)
     note: str = ""
 
 
@@ -175,6 +186,9 @@ class PipelineOutput:
     review_rows: list[NormalizedRow]
     source_summary_path: Path | None = None
     source_report_path: Path | None = None
+    review_summary_json_path: Path | None = None
+    review_summary_xlsx_path: Path | None = None
+    run_delta_path: Path | None = None
     autofix_report_json_path: Path | None = None
     autofix_report_xlsx_path: Path | None = None
     autofix_rows: int = 0

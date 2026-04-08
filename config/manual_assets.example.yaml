@@ -1,0 +1,9 @@
+sources:
+  iir-schedule:
+    - url: https://www.iir.edu.ua/example/official-schedule.xlsx
+      display_name: IIR direct official workbook
+      asset_kind: file_url
+  military-schedule:
+    - url: https://mil.knu.ua/example/official-schedule.pdf
+      display_name: Military official schedule PDF
+      asset_kind: file_url

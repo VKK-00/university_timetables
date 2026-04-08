@@ -39,6 +39,10 @@ HARD_FAIL_FLAGS = {
 }
 LESSON_TEXT_RE = re.compile(r"(?iu)\((?:лек|прак|сем|лаб|lek|sem|prac)")
 TRAILING_ROOM_RE = re.compile(r"(?iu)(?:\s*/\s*|\s+)(?:\d{3,4}[А-ЯІЇЄҐA-Z]?|[А-ЯІЇЄҐA-Z]-?\d{2,4}|(?:хімічний|географічний)\s+ф-?т\s+\d{2,4})$")
+EXTENDED_DURATION_SUBJECT_RE = re.compile(
+    r"(?iu)\b(?:кваліфікаційн\w+\s+робот\w+|захист\w+|атестаці\w+|dissertation|thesis)\b"
+)
+ABBREVIATED_SUBJECT_RE = re.compile(r"(?iu)^(?:ст|ас|доц|проф|викл)\.?$")
 
 
 def partition_rows(rows: list[NormalizedRow], threshold: float) -> tuple[list[NormalizedRow], list[NormalizedRow]]:
@@ -142,6 +146,8 @@ def analyze_row_quality(row: NormalizedRow) -> NormalizedRow:
         flags.append("garbage_text")
     if subject and not any(character.isalpha() for character in subject):
         flags.append("garbage_text")
+    if subject and ABBREVIATED_SUBJECT_RE.fullmatch(subject):
+        flags.append("garbage_text")
     compact_subject = subject.replace(" ", "")
     if (
         subject
@@ -156,7 +162,7 @@ def analyze_row_quality(row: NormalizedRow) -> NormalizedRow:
         flags.append("garbage_text")
     if subject and " " not in subject and re.fullmatch(r"[A-Za-z0-9=._-]{10,}", subject):
         flags.append("garbage_text")
-    if _has_implausible_time(row.start_time, row.end_time):
+    if _has_implausible_time(row.start_time, row.end_time, subject):
         flags.append("implausible_time")
 
     severity = "none"
@@ -187,7 +193,7 @@ def _looks_like_fragment_subject(subject: str) -> bool:
     return False
 
 
-def _has_implausible_time(start_time: str, end_time: str) -> bool:
+def _has_implausible_time(start_time: str, end_time: str, subject: str = "") -> bool:
     bounds = []
     for value in (start_time, end_time):
         if not value or ":" not in value:
@@ -201,7 +207,11 @@ def _has_implausible_time(start_time: str, end_time: str) -> bool:
         return True
     if len(bounds) == 2:
         duration = bounds[1] - bounds[0]
-        if duration < 30 or duration > 240:
+        if duration < 30:
+            return True
+        if duration > 240:
+            if EXTENDED_DURATION_SUBJECT_RE.search(subject) and duration <= 360:
+                return False
             return True
     return False
 
@@ -268,7 +278,7 @@ def _audit_single_workbook(path: Path) -> WorkbookQaSummary:
                 issue_counter["subject_too_long"] += 1
             if teacher and len(teacher) > 180:
                 issue_counter["teacher_too_long"] += 1
-            if _has_implausible_time(start_time, end_time):
+            if _has_implausible_time(start_time, end_time, subject):
                 issue_counter["implausible_time"] += 1
         if row_count == 0:
             issue_counter["empty_sheet"] += 1

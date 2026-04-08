@@ -194,3 +194,50 @@ def test_generic_grid_workbook_supports_days_with_dates() -> None:
     assert records
     assert records[0].values["day"] == "Понеділок"
     assert records[0].values["start_time"] == "14:10"
+
+
+def test_generic_grid_workbook_skips_mid_sheet_headers_and_room_only_cells() -> None:
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "\u041b\u0438\u0441\u04421"
+    worksheet["C1"] = "\u0420\u043e\u0437\u043a\u043b\u0430\u0434 \u0437\u0430\u043d\u044f\u0442\u044c 2025 2026 \u043d\u0430\u0432\u0447.\u0440."
+    worksheet["C2"] = "1 \u043a\u0443\u0440\u0441"
+    worksheet["C3"] = "\u0433\u0440\u0443\u043f\u0430 1"
+    worksheet["A4"] = "\u041f\u043e\u043d\u0435\u0434\u0456\u043b\u043e\u043a"
+    worksheet["B4"] = "8:40-10:15"
+    worksheet["C4"] = "\u0410\u043b\u0433\u0435\u0431\u0440\u0430"
+    worksheet["C5"] = "\u0434\u043e\u0446. \u0406\u0432\u0430\u043d\u0435\u043d\u043a\u043e \u0406.\u0406."
+    worksheet["A8"] = "I\u0406 \u043a\u0443\u0440\u0441"
+    worksheet["C8"] = "\u0424\u0443\u043d\u0434\u0430\u043c\u0435\u043d\u0442\u0430\u043b\u044c\u043d\u0430 \u043c\u0435\u0434\u0438\u0447\u043d\u0430 \u0444\u0456\u0437\u0438\u043a\u0430"
+    worksheet["A9"] = "\u0412\u0456\u0432\u0442\u043e\u0440\u043e\u043a"
+    worksheet["B9"] = "8:40-10:15"
+    worksheet["C9"] = "\u043f\u0440. 301"
+    worksheet["C10"] = "\u041b\u0456\u043d\u0456\u0439\u043d\u0430 \u0430\u043b\u0433\u0435\u0431\u0440\u0430"
+    worksheet["C11"] = "\u0434\u043e\u0446. \u041f\u0435\u0442\u0440\u043e\u0432 \u041f.\u041f."
+
+    buffer = BytesIO()
+    workbook.save(buffer)
+    asset = DiscoveredAsset(
+        source_name="generic-grid",
+        source_kind="file_url",
+        source_url_or_path="https://example.edu/schedule.xlsx",
+        asset_kind="file_url",
+        locator="https://example.edu/schedule.xlsx",
+        display_name="schedule.xlsx",
+    )
+    fetched = FetchedAsset(
+        asset=asset,
+        content=buffer.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        content_hash="generic-grid-headers",
+        resolved_locator="generic-grid-headers.xlsx",
+    )
+
+    document = parse_excel_asset(fetched)
+    records = [record for sheet in document.sheets for record in sheet.records]
+    subjects = {record.values["subject"] for record in records}
+
+    assert "\u0410\u043b\u0433\u0435\u0431\u0440\u0430" in subjects
+    assert "\u041b\u0456\u043d\u0456\u0439\u043d\u0430 \u0430\u043b\u0433\u0435\u0431\u0440\u0430" in subjects
+    assert "\u0424\u0443\u043d\u0434\u0430\u043c\u0435\u043d\u0442\u0430\u043b\u044c\u043d\u0430 \u043c\u0435\u0434\u0438\u0447\u043d\u0430 \u0444\u0456\u0437\u0438\u043a\u0430" not in subjects
+    assert "\u043f\u0440. 301" not in subjects

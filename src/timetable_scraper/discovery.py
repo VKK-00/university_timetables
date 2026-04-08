@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import zipfile
 from pathlib import Path
-from urllib.parse import urldefrag, urljoin, urlparse
+from urllib.parse import unquote, urldefrag, urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -33,6 +33,10 @@ NEGATIVE_CANDIDATE_PATTERNS = (
     re.compile(r"(?iu)\bрезультат"),
     re.compile(r"(?iu)\bсписки?\b"),
     re.compile(r"(?iu)\bнаука\b"),
+    re.compile(r"(?iu)\bу\s+20\d{2}\s+році\b"),
+    re.compile(r"(?iu)\b[ув][\s_-]*20\d{2}[\s_-]*роц[ії]\b"),
+    re.compile(r"(?iu)\bрозподіл\s+навантаження\b"),
+    re.compile(r"(?iu)\bтаблиц(?:я|і)\s+\d+\b"),
 )
 
 
@@ -56,12 +60,12 @@ def discover_sources(sources: list[SourceConfig], session: requests.Session | No
 def discover_source(source: SourceConfig, session: requests.Session | None = None) -> DiscoveryResult:
     session = session or requests.Session()
     if source.kind == "folder":
-        return _discover_folder(source)
+        return _append_manual_assets(_discover_folder(source), source)
     if source.kind == "zip":
-        return _discover_zip(source)
+        return _append_manual_assets(_discover_zip(source), source)
     if source.kind in {"file_url", "google_sheet"}:
         root = source.url or ""
-        return DiscoveryResult(
+        result = DiscoveryResult(
             assets=[
                 DiscoveredAsset(
                     source_name=source.name,
@@ -76,8 +80,9 @@ def discover_source(source: SourceConfig, session: requests.Session | None = Non
             ],
             issues=[],
         )
+        return _append_manual_assets(result, source)
     if source.kind == "web_page":
-        return _discover_web_page(
+        result = _discover_web_page(
             source,
             session=session,
             url=source.url,
@@ -86,10 +91,12 @@ def discover_source(source: SourceConfig, session: requests.Session | None = Non
             max_depth=source.follow_links_depth,
             visited=set(),
         )
-    return DiscoveryResult(
+        return _append_manual_assets(result, source)
+    result = DiscoveryResult(
         assets=[],
         issues=[DiscoveryIssue(source_name=source.name, reason=f"Unsupported source kind: {source.kind}")],
     )
+    return _append_manual_assets(result, source)
 
 
 def _discover_folder(source: SourceConfig) -> DiscoveryResult:
@@ -549,7 +556,49 @@ def _score_page(text: str, keywords: list[str]) -> int:
 def _should_skip_candidate(*, label: str, resolved: str, asset_kind: str, score: int) -> bool:
     if asset_kind not in {"file_url", "web_link"}:
         return False
-    text = f"{label} {resolved}"
+    text = _decode_candidate_filter_text(label=label, resolved=resolved)
     if any(pattern.search(text) for pattern in NEGATIVE_CANDIDATE_PATTERNS) and score <= 1:
         return True
     return False
+
+
+def _decode_candidate_filter_text(*, label: str, resolved: str) -> str:
+    decoded_label = unquote(label)
+    decoded_resolved = unquote(resolved)
+    return f"{decoded_label} {decoded_resolved}"
+
+
+def _append_manual_assets(result: DiscoveryResult, source: SourceConfig) -> DiscoveryResult:
+    if not source.manual_assets:
+        return result
+    assets = [*result.assets, *_build_manual_assets(source)]
+    return DiscoveryResult(assets=_dedupe_assets(assets), issues=result.issues)
+
+
+def _build_manual_assets(source: SourceConfig) -> list[DiscoveredAsset]:
+    root = source.url or (str(source.path.resolve()) if source.path is not None else "")
+    assets: list[DiscoveredAsset] = []
+    for seed in source.manual_assets:
+        parsed = urlparse(seed.url)
+        suffix = Path(parsed.path).suffix.lower()
+        inferred_kind = "google_sheet" if parsed.netloc.casefold().removeprefix("www.") in {"docs.google.com", "drive.google.com"} and "/spreadsheets/" in parsed.path else "file_url"
+        asset_kind = seed.asset_kind or inferred_kind
+        assets.append(
+            DiscoveredAsset(
+                source_name=source.name,
+                source_kind=source.kind,
+                asset_kind=asset_kind,
+                locator=seed.url,
+                display_name=seed.display_name or seed.url,
+                source_root_url=root,
+                source_url_or_path=root,
+                origin_kind="manual_seed",
+                metadata={
+                    "manual_seed": True,
+                    "score": _score_page(f"{seed.display_name} {seed.url}", source.schedule_keywords),
+                    "discovered_from": root,
+                    "suffix": suffix,
+                },
+            )
+        )
+    return assets

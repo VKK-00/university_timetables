@@ -1,18 +1,18 @@
 # university_timetables
 
-`university_timetables` is a KNU-first university timetable scraper. It collects schedules from local folders and ZIP archives, faculty websites, public Google Sheets and Google Drive assets, direct file links, HTML tables, and PDF files with OCR fallback, then exports normalized Excel workbooks based on [`Шаблон.xlsx`](./Шаблон.xlsx).
+`university_timetables` is a KNU-first timetable scraper. It collects schedules from local files, faculty websites, public Google Sheets and Google Drive assets, direct file links, HTML tables, and PDFs with OCR fallback, then exports normalized Excel workbooks based on [`Шаблон.xlsx`](./Шаблон.xlsx).
 
-`university_timetables` це KNU-first скрепер університетських розкладів. Він тягне розклади з локальних папок і ZIP-архівів, сайтів факультетів, публічних Google Sheets і Google Drive, прямих посилань на файли, HTML-таблиць і PDF з OCR fallback, а потім експортує нормалізовані Excel-файли на основі [`Шаблон.xlsx`](./Шаблон.xlsx).
+`university_timetables` це KNU-first скрепер університетських розкладів. Він тягне розклади з локальних файлів, сайтів факультетів, публічних Google Sheets і Google Drive, прямих посилань на файли, HTML-таблиць і PDF з OCR fallback, а потім експортує нормалізовані Excel-книги на основі [`Шаблон.xlsx`](./Шаблон.xlsx).
 
 ## Overview / Огляд
 
 - Fixed pipeline: `discover -> fetch -> parse -> normalize -> validate/confidence -> export -> post-run QA`
 - Main CLI entrypoints: `doctor`, `inspect-source`, `run`
-- Output format is template-driven: row 1 contains the program title, row 2 contains headers, row 3+ contains normalized rows
-- Row-level QA removes broken or ambiguous records from final Excel output and moves them to `review_queue.xlsx`
-- Autofixes are tracked per row and exported into dedicated autofix reports for every run
-- Workbook-level QA checks every exported `.xlsx`; `run` keeps outputs but returns non-zero if any workbook fails QA
-- The project is intentionally KNU-first. It does not claim that every official KNU source is fully parseable today
+- Output is template-driven: row 1 contains the program title, row 2 contains headers, row 3+ contains normalized rows
+- Row-level QA keeps broken or ambiguous rows out of exported Excel and moves them into `review_queue.xlsx`
+- Autofixes are tracked per row and written into dedicated reports
+- Workbook-level QA checks every exported `.xlsx`; `run` writes outputs but returns non-zero only when there are QA failures
+- The project is intentionally KNU-first. It does not claim that every official KNU source is always fully parseable
 
 ## What It Ingests / Що вміє тягнути
 
@@ -23,42 +23,48 @@
 - Faculty and institute web pages with link discovery
 - HTML tables and simple schedule-like blocks
 - PDF files with text extraction first and OCR fallback via Tesseract
+- Optional manually seeded official direct assets through `manual_assets.yaml`
 
 ## Current KNU Coverage / Поточне покриття КНУ
 
-Latest full KNU web run source of truth: April 7, 2026
+Latest full KNU web run source of truth: April 8, 2026
 
-- `42921` accepted rows
-- `9030` review rows
-- `51861` rows with autofixes
+- `151` exported workbooks
+- `43660` accepted rows
+- `3330` review rows
+- `46892` rows with autofixes
 - `0` QA warnings
 - `0` QA failures
 
 Current source statuses:
 
 - `parsed`: `Geo`, `Econom`, `History`, `Mechmat`, `FIT`, `Psychology`, `REX`, `Sociology`, `Physics`, `Philosophy`, `Chemistry`, `Law`, `IHT`, `Journalism`, `Geology`, `Biomed`
-- `confirmed-blocker`: `CSC`, `Military`, `IIR`
-- `review-only`: `Philology`
+- `confirmed-blocker`: `CSC`, `Military`, `IIR`, `Philology`
+- `review-only`: none
 
 Largest parsed sources in the current run:
 
-- `FIT: 26809 accepted, 1043 review`
-- `Physics: 6605 accepted, 5018 review`
-- `Sociology: 3937 accepted, 347 review`
+- `FIT: 27104 accepted, 275 review`
+- `Physics: 6862 accepted, 357 review`
+- `Sociology: 4003 accepted, 269 review`
 
 Detailed coverage and source-level status are documented in:
 
 - [`out_knu_web/source_summary.md`](./out_knu_web/source_summary.md)
 - [`out_knu_web/source_summary.json`](./out_knu_web/source_summary.json)
+- [`out_knu_web/review_summary.json`](./out_knu_web/review_summary.json)
+- [`out_knu_web/review_summary.xlsx`](./out_knu_web/review_summary.xlsx)
+- [`out_knu_web/run_delta.json`](./out_knu_web/run_delta.json)
 - [`out_knu_web/qa_report.json`](./out_knu_web/qa_report.json)
 - [`out_knu_web/qa_report.xlsx`](./out_knu_web/qa_report.xlsx)
 
-The current best-possible state is:
+Current best-possible state:
 
 - the system runs across all configured KNU sources
 - every source gets an explicit final status
 - low-quality rows are pushed to review instead of silently exported
-- some official sources are still blocked by the source itself or remain only partially parseable
+- manual official direct assets can be seeded when a source page is blocked but an official file is known
+- some official sources are still blocked by the source itself and remain `confirmed-blocker`
 
 ## Quick Start
 
@@ -74,7 +80,7 @@ Verify the environment, including OCR dependencies:
 python -m timetable_scraper doctor
 ```
 
-Inspect discovered assets for a config before a full run:
+Inspect discovered assets before a full run:
 
 ```powershell
 python -m timetable_scraper inspect-source --config config/sources.yaml
@@ -86,7 +92,7 @@ Run the main pipeline:
 python -m timetable_scraper run --config config/sources.yaml
 ```
 
-Run the KNU web coverage config:
+Run the full KNU web coverage config:
 
 ```powershell
 python -m timetable_scraper run --config config/knu_web_schedule.yaml
@@ -101,6 +107,7 @@ The main config file contains:
 - `cache_dir`
 - `confidence_threshold`
 - `ocr_enabled`
+- `manual_assets_path`
 - `sources[]`
 
 Supported `sources[].kind` values:
@@ -119,6 +126,7 @@ output_dir: ../out
 cache_dir: ../.cache/timetable_scraper
 confidence_threshold: 0.74
 ocr_enabled: true
+manual_assets_path: manual_assets.yaml
 sources:
   - name: knu-archive
     kind: zip
@@ -134,15 +142,25 @@ sources:
     url: https://docs.google.com/spreadsheets/d/.../edit#gid=0
 ```
 
+Manual official asset seeding:
+
+- `config/manual_assets.yaml` is optional
+- it is intended for cases where the official source page is blocked or unstable, but an official direct XLSX/PDF link is known
+- seeded assets keep the original `source_root_url` provenance and are marked as `manual_seed` in discovery
+- example structure is provided in [`config/manual_assets.example.yaml`](./config/manual_assets.example.yaml)
+
 ## Outputs
 
 - `out/<faculty>/<program>.xlsx`: normalized schedule workbooks exported in the template layout
-- `out/manifest.jsonl`: one JSON line per normalized row with provenance, warnings, confidence, and content hash
+- `out/manifest.jsonl`: one JSON line per normalized row with provenance, warnings, confidence, QA flags, and content hash
 - `out/review_queue.xlsx`: rows that failed QA or remained ambiguous after parsing
 - `out/autofix_report.json`: machine-readable summary of autofix actions applied during normalization
 - `out/autofix_report.xlsx`: readable autofix summary and per-row autofix trace
 - `out/qa_report.json`: machine-readable workbook QA summary
 - `out/qa_report.xlsx`: readable workbook QA summary
+- `out/review_summary.json`: machine-readable aggregation of review backlog by source, warning, and QA flag
+- `out/review_summary.xlsx`: readable review aggregation report
+- `out/run_delta.json`: per-source delta between the previous and current run
 - `out_knu_web/source_summary.md`: source-level status summary for the KNU web run
 - `out_knu_web/source_summary.json`: machine-readable source-level status summary
 
@@ -158,7 +176,7 @@ Rows stay in exported Excel only if they have at least:
 Rows are moved to review if they show signs of:
 
 - mixed columns inside `subject`
-- room, link, or teacher text still embedded into the wrong field
+- room, link, or teacher text embedded into the wrong field
 - admin or service text embedded into schedule rows
 - OCR or PDF garbage
 - fragmented PDF slot parsing
@@ -171,6 +189,7 @@ Additional guarantees in the current pipeline:
 - `week_source` is preserved in normalized data
 - `autofix_actions` is preserved in normalized data, `manifest.jsonl`, and `review_queue.xlsx`
 - `run` cleans the target output directory before writing a new result set
+- post-run QA checks every exported workbook automatically
 
 ## OCR Requirements
 
@@ -197,16 +216,22 @@ If OCR dependencies are missing, `doctor` fails explicitly and `run` should not 
 - Some official sources are blocked by `403 / Cloudflare`
 - Some public storage links, especially OneDrive-based sources, block anonymous download
 - Some PDFs still parse only partially and therefore produce more review rows than accepted rows
-- `review-only` status means the source was reached, but the current parser could not extract a reliable final timetable without lowering quality thresholds
+- Manual asset seeding improves recoverability, but it does not bypass private or non-public storage restrictions
 
 Current non-parsed KNU statuses:
 
-- `confirmed-blocker`: `CSC`, `Military`, `IIR`
-- `review-only`: `Philology`
+- `confirmed-blocker`: `CSC`, `Military`, `IIR`, `Philology`
+
+Current blocker reasons:
+
+- `CSC`: the official asset is no longer publicly available and now returns `HTTP 410`
+- `Military`: the official source is blocked by `HTTP 403 / Cloudflare`
+- `IIR`: official OneDrive-backed assets block anonymous download with `HTTP 403`
+- `Philology`: the official PDF still extracts into rows that are too noisy to export reliably
 
 ## Development and Tests
 
-Run the main validation suite:
+Main validation suite:
 
 ```powershell
 python -m ruff check src tests

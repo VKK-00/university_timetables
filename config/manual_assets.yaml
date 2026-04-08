@@ -1,0 +1,9 @@
+sources:
+  csc-schedule:
+    - url: https://docs.google.com/spreadsheets/d/1JbzM1hG5SDQoBKyF1TEceZSFQhuebHJE/edit?usp=sharing
+      display_name: CSC official semester 1 2025-2026 workbook
+      asset_kind: google_sheet
+  philology-schedule:
+    - url: https://drive.google.com/uc?export=download&id=1eOZk_dsFr_k45_fInIhJb9MwngCHEKJt
+      display_name: Philology official postgraduate schedule PDF
+      asset_kind: file_url

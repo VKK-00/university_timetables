@@ -56,6 +56,9 @@ BODY_COLUMNS = [
     "notes",
 ]
 
+MAX_EXPORT_FACULTY_LENGTH = 80
+MAX_EXPORT_PROGRAM_LENGTH = 120
+
 
 @dataclass(slots=True)
 class CellStyleSnapshot:
@@ -128,7 +131,9 @@ def _export_program_workbooks(rows: list[NormalizedRow], *, template_path: Path,
                 _prepare_output_sheet(sheet, program=program, style_pack=style_pack)
             for row_index, row in enumerate(sheet_rows, start=3):
                 _write_body_row(sheet, row_index, row, style_pack)
-        target = output_dir / slugify_filename(faculty) / f"{slugify_filename(program)}.xlsx"
+        faculty_dir = _truncate_export_name(slugify_filename(faculty), max_length=MAX_EXPORT_FACULTY_LENGTH)
+        program_name = _truncate_export_name(slugify_filename(program), max_length=MAX_EXPORT_PROGRAM_LENGTH)
+        target = output_dir / faculty_dir / f"{program_name}.xlsx"
         ensure_parent(target)
         workbook.save(target)
         exported.append(target)
@@ -395,3 +400,13 @@ def _sort_key(row: NormalizedRow) -> tuple[int, str, str, str]:
         "Неділя": 7,
     }
     return (day_order.get(row.day, 99), row.start_time, row.week_type, row.subject)
+
+
+def _truncate_export_name(value: str, *, max_length: int) -> str:
+    cleaned = value.strip(" .")
+    if not cleaned:
+        return "untitled"
+    if len(cleaned) <= max_length:
+        return cleaned
+    trimmed = cleaned[:max_length].rstrip(" ._-")
+    return trimmed or "untitled"

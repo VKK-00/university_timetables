@@ -12,11 +12,18 @@ from .fetch import fetch_asset
 from .models import AppConfig, PipelineOutput
 from .normalize import normalize_document
 from .qa import audit_exported_workbooks, partition_rows, refine_group_quality
-from .reporting import build_source_summaries, write_source_summaries
+from .reporting import (
+    build_source_summaries,
+    load_previous_source_summaries,
+    write_review_summary,
+    write_run_delta,
+    write_source_summaries,
+)
 
 
 def run_pipeline(config: AppConfig) -> PipelineOutput:
     session = requests.Session()
+    previous_summaries = load_previous_source_summaries(config.output_dir)
     discovery = discover_sources(config.sources, session=session)
     normalized_rows = []
     attempted_assets: Counter[str] = Counter()
@@ -43,6 +50,7 @@ def run_pipeline(config: AppConfig) -> PipelineOutput:
         template_path=config.template_path,
         output_dir=config.output_dir,
     )
+    review_summary_json_path, review_summary_xlsx_path = write_review_summary(review, output_dir=config.output_dir)
     autofix_report_json_path, autofix_report_xlsx_path, autofix_rows = write_autofix_report(
         [*accepted, *review],
         output_dir=config.output_dir,
@@ -60,6 +68,7 @@ def run_pipeline(config: AppConfig) -> PipelineOutput:
         runtime_issues=runtime_issues,
     )
     source_summary_path, source_report_path = write_source_summaries(source_summaries, output_dir=config.output_dir)
+    run_delta_path = write_run_delta(source_summaries, previous_summaries, output_dir=config.output_dir)
     return PipelineOutput(
         exported_files=exported_files,
         manifest_path=manifest_path,
@@ -68,6 +77,9 @@ def run_pipeline(config: AppConfig) -> PipelineOutput:
         review_rows=review,
         source_summary_path=source_summary_path,
         source_report_path=source_report_path,
+        review_summary_json_path=review_summary_json_path,
+        review_summary_xlsx_path=review_summary_xlsx_path,
+        run_delta_path=run_delta_path,
         autofix_report_json_path=autofix_report_json_path,
         autofix_report_xlsx_path=autofix_report_xlsx_path,
         autofix_rows=autofix_rows,

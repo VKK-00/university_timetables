@@ -51,6 +51,12 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Source summary: {result.source_summary_path}")
         if result.source_report_path:
             print(f"Source report: {result.source_report_path}")
+        if result.review_summary_json_path:
+            print(f"Review summary (json): {result.review_summary_json_path}")
+        if result.review_summary_xlsx_path:
+            print(f"Review summary (xlsx): {result.review_summary_xlsx_path}")
+        if result.run_delta_path:
+            print(f"Run delta: {result.run_delta_path}")
         if result.autofix_report_json_path:
             print(f"Autofix report (json): {result.autofix_report_json_path}")
         if result.autofix_report_xlsx_path:

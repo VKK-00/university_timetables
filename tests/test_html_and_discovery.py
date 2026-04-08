@@ -5,7 +5,7 @@ from pathlib import Path
 
 from timetable_scraper.adapters.html import parse_html_asset
 from timetable_scraper.discovery import discover_source
-from timetable_scraper.models import DiscoveredAsset, FetchedAsset, SourceConfig
+from timetable_scraper.models import DiscoveredAsset, FetchedAsset, ManualAssetSeed, SourceConfig
 
 WEB_DIR = Path(__file__).parent / "fixtures" / "web"
 
@@ -123,6 +123,56 @@ def test_discovery_skips_non_schedule_promotional_assets() -> None:
     assert "https://example.edu/files/rozklad_2_sem.pdf" in locators
     assert "https://example.edu/files/information_booklet.pdf" not in locators
     assert "https://example.edu/files/dean_report.pdf" not in locators
+
+
+def test_discovery_skips_percent_encoded_non_schedule_assets() -> None:
+    url = "https://example.edu/faculty/schedule"
+    html = """
+    <html><body>
+      <a href="/files/%D1%80%D0%BE%D0%B7%D0%BA%D0%BB%D0%B0%D0%B4_2_%D1%81%D0%B5%D0%BC.pdf">Розклад 2 семестр</a>
+      <a href="/files/%D0%A4%D0%86%D0%A2_%D0%B7%D0%B2%D1%96%D1%82_2020.pdf">ФІТ звіт 2020</a>
+    </body></html>
+    """
+    session = FakeSession({url: html})
+    source = SourceConfig(
+        kind="web_page",
+        name="faculty-web",
+        url=url,
+        allow_domains=["example.edu"],
+        schedule_keywords=["розклад", "schedule"],
+    )
+
+    result = discover_source(source, session=session)
+    locators = {asset.locator for asset in result.assets}
+
+    assert "https://example.edu/files/%D1%80%D0%BE%D0%B7%D0%BA%D0%BB%D0%B0%D0%B4_2_%D1%81%D0%B5%D0%BC.pdf" in locators
+    assert "https://example.edu/files/%D0%A4%D0%86%D0%A2_%D0%B7%D0%B2%D1%96%D1%82_2020.pdf" not in locators
+
+
+def test_discovery_appends_manual_seed_assets_with_root_provenance() -> None:
+    url = "https://example.edu/faculty/schedule"
+    html = "<html><body><p>Schedule page</p></body></html>"
+    session = FakeSession({url: html})
+    source = SourceConfig(
+        kind="web_page",
+        name="iir-schedule",
+        url=url,
+        allow_domains=["example.edu"],
+        manual_assets=[
+            ManualAssetSeed(
+                url="https://files.example.edu/official/iir_schedule.xlsx",
+                display_name="IIR direct workbook",
+                asset_kind="file_url",
+            )
+        ],
+    )
+
+    result = discover_source(source, session=session)
+
+    manual_asset = next(asset for asset in result.assets if asset.locator.endswith("iir_schedule.xlsx"))
+    assert manual_asset.origin_kind == "manual_seed"
+    assert manual_asset.source_root_url == url
+    assert manual_asset.metadata["manual_seed"] is True
 
 
 def test_html_table_adapter_parses_rows() -> None:

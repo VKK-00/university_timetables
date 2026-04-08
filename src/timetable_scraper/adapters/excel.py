@@ -13,14 +13,26 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from ..models import FetchedAsset, ParsedDocument, ParsedSheet, RawRecord
 from ..normalize import records_from_tabular_rows
-from ..utils import DAY_NAMES, excerpt_from_values, flatten_multiline, infer_faculty_from_locator, normalize_day, normalize_header, parse_time_range, parse_time_value
+from ..utils import (
+    DAY_NAMES,
+    excerpt_from_values,
+    flatten_multiline,
+    infer_faculty_from_locator,
+    looks_like_roomish_subject_text,
+    normalize_day,
+    normalize_header,
+    parse_time_range,
+    parse_time_value,
+)
 
 DAY_OR_TIME_HEADERS = {"день", "час"}
 FIT_TEACHER_RE = re.compile(
     r"(?i)(?:проф\.?|доц\.?|ас\.?|ст\.викл\.?|викл\.?)|[А-ЯІЇЄҐ][а-яіїєґ'-]+\s+[А-ЯІЇЄҐ]\.\s*[А-ЯІЇЄҐ]\."
 )
-FIT_ROOM_RE = re.compile(r"(?i)(ауд\.|корпус|корп\.|клінік|лаборатор|каб\.|online|онлайн)")
-FIT_LINK_RE = re.compile(r"(?i)(https?://|zoom|meet|teams|google meet|knu-ua\.zoom|id:\s*\d|код[:\s])")
+FIT_ROOM_RE = re.compile(r"(?i)(ауд(?:\.|\b)|корпус|корп(?:\.|\b)|клінік|лаборатор|каб(?:\.|\b)|online|онлайн)")
+FIT_LINK_RE = re.compile(
+    r"(?i)(https?://|zoom|meet|teams|microsoft|google meet|knu-ua\.zoom|meeting\s*id|passcode|pwd=|id:\s*\d|код(?:[:\s]|\s+доступу))"
+)
 FIT_WEEK_RE = re.compile(r"(?i)(\[[^\]]+\]|\bч/т\b|\bпо\s+\d{2}\.\d{2}\b|\bз\s+\d{2}\.\d{2}\b|\b(?:i|ii|1|2)\s*тиж)")
 FIT_COUNT_RE = re.compile(r"^\d+(?:\.0)?$")
 FIT_TRAILING_WEEKS_RE = re.compile(r"\s*(\[[^\]]+\])+\s*$")
@@ -51,6 +63,9 @@ GENERIC_COURSE_RE = re.compile(r"(?i)\b(\d+)\s*курс\b")
 GENERIC_GROUP_RE = re.compile(r"(?i)\b(?:група|підгрупа|subgroup)\b")
 GENERIC_PARTIAL_TIME_RE = re.compile(r"(?P<start>\d{1,2}[:.]\d{2})\s*[-–—]?\s*$")
 GENERIC_END_TIME_RE = re.compile(r"^(?P<end>\d{1,2}[:.]\d{2})$")
+GENERIC_HEADER_LABEL_RE = re.compile(
+    r"(?iu)^(?:[ivxіvх]+\s*курс|\d+\s*курс|\d+\s*магістр(?:и|ів)?|івт|астрономія|оптика|фізичне матеріало-\s*знавство)$"
+)
 
 
 @dataclass(slots=True)
@@ -101,9 +116,22 @@ def _parse_xlsx_asset(fetched_asset: FetchedAsset) -> ParsedDocument:
             warnings.append(f"Skipped empty sheet '{worksheet.title}'.")
             continue
         program = _extract_program_title(rows, fallback=worksheet.title)
-        records, row_warnings = records_from_tabular_rows(rows, program=program, faculty=faculty, sheet_name=worksheet.title)
-        if not records and _looks_like_generic_grid_schedule(worksheet):
-            records, row_warnings = _parse_generic_grid_schedule_sheet(worksheet, faculty=faculty)
+        if _looks_like_generic_grid_schedule(worksheet):
+            records, row_warnings = _parse_generic_grid_schedule_sheet(worksheet, faculty=faculty, program=program)
+            if not records:
+                records, row_warnings = records_from_tabular_rows(
+                    rows,
+                    program=program,
+                    faculty=faculty,
+                    sheet_name=worksheet.title,
+                )
+        else:
+            records, row_warnings = records_from_tabular_rows(
+                rows,
+                program=program,
+                faculty=faculty,
+                sheet_name=worksheet.title,
+            )
         sheets.append(
             ParsedSheet(
                 sheet_name=worksheet.title,
@@ -317,12 +345,16 @@ def _classify_fit_cell(text: str) -> str:
         return "ignore"
     if FIT_LINK_RE.search(cleaned):
         return "link"
+    if looks_like_roomish_subject_text(cleaned):
+        return "room"
     if FIT_ROOM_RE.search(cleaned):
         return "room"
     if FIT_TEACHER_RE.search(cleaned):
         return "teacher"
     if FIT_WEEK_RE.search(cleaned) and not _looks_like_subject_text(cleaned):
         return "week"
+    if _looks_like_fit_noise_text(cleaned):
+        return "ignore"
     if not any(character.isalpha() for character in cleaned):
         return "ignore"
     return "subject"
@@ -331,6 +363,24 @@ def _classify_fit_cell(text: str) -> str:
 def _looks_like_subject_text(text: str) -> bool:
     lowered = text.casefold()
     return any(marker in lowered for marker in ("(", "лаб", "лек", "пр", "сем", "основи", "архітект", "матем", "комп", "кібер", "інозем"))
+
+
+def _looks_like_fit_noise_text(text: str) -> bool:
+    cleaned = flatten_multiline(text)
+    compact = cleaned.replace(" ", "")
+    if not cleaned:
+        return True
+    if len(cleaned) <= 3 and cleaned.endswith("."):
+        return True
+    if normalize_header(cleaned) in {"ст", "ас", "доц", "проф", "викл"}:
+        return True
+    if compact.startswith(".") and "microsoft" in compact.casefold():
+        return True
+    if re.fullmatch(r"[A-Za-z0-9._=+-]{6,}", compact):
+        has_mixed_code = any(character.isdigit() for character in compact) and any(character.isalpha() for character in compact)
+        if has_mixed_code or compact.casefold().startswith(("pwd", "id")):
+            return True
+    return False
 
 
 def _collect_fit_metadata(subject_cell: GridCell, block_cells: list[GridCell]) -> tuple[str, str, str, list[str]]:
@@ -382,6 +432,8 @@ def _split_fit_subject(text: str) -> tuple[str, str, list[str]]:
         cleaned = FIT_T_COUNT_RE.sub("", cleaned).strip()
     if lesson_type:
         cleaned = re.sub(r"\s{2,}", " ", cleaned).strip(" -/;")
+    if _looks_like_fit_noise_text(cleaned) or looks_like_roomish_subject_text(cleaned):
+        return "", lesson_type, _unique_list(notes)
     return cleaned or flatten_multiline(text), lesson_type, _unique_list(notes)
 
 
@@ -499,13 +551,25 @@ def _looks_like_generic_grid_schedule(worksheet: Worksheet) -> bool:
     return day_hits >= 2 and time_hits >= 2
 
 
-def _parse_generic_grid_schedule_sheet(worksheet: Worksheet, *, faculty: str) -> tuple[list[RawRecord], list[str]]:
+def _parse_generic_grid_schedule_sheet(
+    worksheet: Worksheet,
+    *,
+    faculty: str,
+    program: str,
+) -> tuple[list[RawRecord], list[str]]:
     merged_lookup = _build_merged_lookup(worksheet)
     day_col, time_col, first_day_row = _detect_generic_axis_columns(worksheet, merged_lookup)
     if not day_col or not time_col or not first_day_row:
         return [], [f"Could not detect grid schedule axes in sheet '{worksheet.title}'."]
     schedule_min_col = max(day_col, time_col) + 1
-    cells = _collect_generic_grid_cells(worksheet, merged_lookup, first_day_row=first_day_row, schedule_min_col=schedule_min_col)
+    cells = _collect_generic_grid_cells(
+        worksheet,
+        merged_lookup,
+        first_day_row=first_day_row,
+        day_col=day_col,
+        time_col=time_col,
+        schedule_min_col=schedule_min_col,
+    )
     day_cells = [cell for cell in cells if cell.kind == "day"]
     time_cells = _build_generic_time_cells(worksheet, merged_lookup, time_col=time_col, first_day_row=first_day_row)
     subject_cells = [cell for cell in cells if cell.kind == "subject" and cell.min_col >= schedule_min_col]
@@ -531,7 +595,7 @@ def _parse_generic_grid_schedule_sheet(worksheet: Worksheet, *, faculty: str) ->
         groups = _compose_generic_groups(header_context, subject_cell.min_col, subject_cell.max_col)
         course = _compose_generic_courses(header_context, subject_cell.min_col, subject_cell.max_col)
         values = {
-            "program": flatten_multiline(worksheet.title),
+            "program": program,
             "faculty": faculty,
             "week_type": _infer_fit_week_type(subject_cell.text, subject_notes, notes),
             "day": day,
@@ -600,6 +664,8 @@ def _collect_generic_grid_cells(
     merged_lookup: dict[tuple[int, int], tuple[int, int, int, int]],
     *,
     first_day_row: int,
+    day_col: int,
+    time_col: int,
     schedule_min_col: int,
 ) -> list[GridCell]:
     seen_anchors: set[tuple[int, int, int, int]] = set()
@@ -613,6 +679,14 @@ def _collect_generic_grid_cells(
             text = flatten_multiline(worksheet.cell(anchor[0], anchor[1]).value)
             kind = _classify_generic_cell(text)
             if kind == "ignore":
+                continue
+            if kind not in {"day", "time"} and _is_generic_header_row(
+                worksheet,
+                merged_lookup,
+                row=anchor[0],
+                day_col=day_col,
+                time_col=time_col,
+            ):
                 continue
             if anchor[1] < schedule_min_col and kind not in {"day", "time"}:
                 continue
@@ -629,11 +703,34 @@ def _collect_generic_grid_cells(
     return cells
 
 
+def _is_generic_header_row(
+    worksheet: Worksheet,
+    merged_lookup: dict[tuple[int, int], tuple[int, int, int, int]],
+    *,
+    row: int,
+    day_col: int,
+    time_col: int,
+) -> bool:
+    current_day = _normalize_generic_day(_expanded_value(worksheet, row, day_col, merged_lookup))
+    current_time = _parse_generic_time_text(_expanded_value(worksheet, row, time_col, merged_lookup))[0] or parse_time_value(
+        _expanded_value(worksheet, row, time_col, merged_lookup)
+    )
+    if current_day in DAY_NAMES.values() or current_time:
+        return False
+    next_day = _normalize_generic_day(_expanded_value(worksheet, row + 1, day_col, merged_lookup))
+    next_time = _parse_generic_time_text(_expanded_value(worksheet, row + 1, time_col, merged_lookup))[0] or parse_time_value(
+        _expanded_value(worksheet, row + 1, time_col, merged_lookup)
+    )
+    return next_day in DAY_NAMES.values() and bool(next_time)
+
+
 def _classify_generic_cell(text: str) -> str:
     cleaned = flatten_multiline(text)
     if not cleaned or FIT_COUNT_RE.fullmatch(cleaned):
         return "ignore"
     normalized = normalize_header(cleaned)
+    if GENERIC_HEADER_LABEL_RE.fullmatch(normalized):
+        return "ignore"
     if _normalize_generic_day(cleaned) in DAY_NAMES.values():
         return "day"
     if _parse_generic_time_text(cleaned)[0] or GENERIC_PARTIAL_TIME_RE.search(cleaned) or GENERIC_END_TIME_RE.search(cleaned):
@@ -642,6 +739,8 @@ def _classify_generic_cell(text: str) -> str:
         return "ignore"
     if FIT_LINK_RE.search(cleaned):
         return "link"
+    if looks_like_roomish_subject_text(cleaned):
+        return "room"
     if FIT_ROOM_RE.search(cleaned) and len(cleaned) <= 180:
         return "room"
     if FIT_TEACHER_RE.search(cleaned) and len(cleaned) <= 220:

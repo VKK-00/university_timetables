@@ -152,3 +152,27 @@ def test_write_autofix_report_creates_summary_and_row_sheets(tmp_path: Path) -> 
     assert workbook["summary"]["A2"].value == "room_from_subject"
     assert workbook["rows"]["I2"].value == "week_type_defaulted, room_from_subject"
     assert autofix_rows == 1
+
+
+def test_export_rows_truncate_overlong_program_filenames(tmp_path: Path) -> None:
+    template_path = next(Path(".").glob("*.xlsx")).resolve()
+    long_program = "Program " + ("very long title " * 20)
+    rows = [
+        NormalizedRow(
+            program=long_program,
+            faculty="Faculty " + ("name " * 10),
+            week_type="ÐžÐ±Ð¸Ð´Ð²Ð°",
+            day="ÐŸÐ¾Ð½ÐµÐ´Ñ–Ð»Ð¾Ðº",
+            start_time="08:00",
+            end_time="09:20",
+            subject="ÐŸÑ€ÐµÐ´Ð¼ÐµÑ‚",
+            sheet_name="1 ÐºÑƒÑ€Ñ",
+        )
+    ]
+
+    exported_files, _, _ = export_rows(rows, [], template_path=template_path, output_dir=tmp_path / "out")
+
+    assert len(exported_files) == 1
+    assert exported_files[0].exists()
+    assert len(exported_files[0].stem) <= 120
+    assert len(exported_files[0].parent.name) <= 80

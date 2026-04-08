@@ -107,6 +107,7 @@ LESSON_TYPE_PATTERNS = (
     (re.compile(r"(?iu)\b(?:лаб|лаб\.|лабораторна)\b"), "лабораторна"),
     (re.compile(r"(?iu)\b(?:сем|сем\.)\b"), "семінар"),
 )
+ABBREVIATED_SUBJECT_RE = re.compile(r"(?iu)^(?:ст|ас|доц|проф|викл)\.?$")
 
 
 def map_headers(headers: list[Any]) -> dict[str, int]:
@@ -385,6 +386,17 @@ def _looks_like_subject_candidate(value: Any) -> bool:
         return False
     if any(pattern in text.casefold() for pattern in SUBJECT_FALLBACK_NOTES_PATTERNS):
         return True
+    compact = re.sub(r"[^\w]+", "", text, flags=re.UNICODE)
+    if ABBREVIATED_SUBJECT_RE.fullmatch(text):
+        return False
+    if looks_like_roomish_subject_text(text):
+        return False
+    if _looks_like_code_segment(text):
+        return False
+    if looks_like_service_text(text) or looks_like_garbage_text(text):
+        return False
+    if " " not in text and len(compact) < 4 and "," not in text:
+        return False
     return (any(ch.isalpha() for ch in text) and not text.isupper()) or ("," in text)
 
 
@@ -426,11 +438,7 @@ def _extract_program_hint(notes: str) -> str:
             if len(re.findall(r"(?iu)\b(?:0\d{2}|1\d{2}|E\d)\b", cleaned)) > 1:
                 continue
             if cleaned.casefold().endswith((" та", " і", " й", " з", " до", " по")):
-                continuation = ""
-                if index + 1 < len(segments):
-                    continuation = normalize_service_tokens(segments[index + 1])
-                elif index > 0:
-                    continuation = normalize_service_tokens(segments[index - 1])
+                continuation = _find_program_continuation(segments, index)
                 if continuation and _looks_like_program_continuation(continuation):
                     cleaned = f"{cleaned} {continuation}"
             if cleaned.casefold().endswith((" та", " і", " й", " з", " до", " по")):
@@ -458,6 +466,35 @@ def _looks_like_program_continuation(value: str) -> bool:
     if looks_like_service_text(cleaned) or looks_like_garbage_text(cleaned):
         return False
     return bool(re.fullmatch(r"(?iu)[А-ЯІЇЄҐа-яіїєґ][А-ЯІЇЄҐа-яіїєґ'’\-\s]{2,}", cleaned))
+
+
+def _find_program_continuation(segments: list[str], index: int) -> str:
+    forward = _scan_program_continuation(segments, range(index + 1, len(segments)))
+    if forward:
+        return forward
+    backward = _scan_program_continuation(segments, range(index - 1, -1, -1))
+    if backward:
+        return backward
+    return ""
+
+
+def _scan_program_continuation(segments: list[str], indexes: Iterable[int]) -> str:
+    for candidate_index in indexes:
+        candidate = normalize_service_tokens(segments[candidate_index])
+        if not candidate:
+            continue
+        if (
+            contains_link_text(candidate)
+            or looks_like_teacher_text(candidate)
+            or looks_like_room_text(candidate)
+            or looks_like_service_text(candidate)
+            or looks_like_garbage_text(candidate)
+        ):
+            continue
+        if not _looks_like_program_continuation(candidate):
+            continue
+        return candidate
+    return ""
 
 
 def _infer_missing_time_bounds(start_time: str, end_time: str, values: dict[str, Any]) -> tuple[str, str]:
@@ -551,13 +588,60 @@ def _cleanup_subject(text: str) -> tuple[str, list[str], list[str], list[str], l
 def _cleanup_aux_field(text: str, *, keep: str) -> tuple[str, list[str], list[str], list[str]]:
     if not text:
         return "", [], [], []
-    residual, teachers, rooms, links = _extract_entities(text)
-    notes: list[str] = []
+    primary_parts: list[str] = []
+    teacher_parts: list[str] = []
+    room_parts: list[str] = []
+    link_parts: list[str] = []
+    note_parts: list[str] = []
+    segments = _split_segments(text)
+    index = 0
+    while index < len(segments):
+        segment = segments[index]
+        teacher_segment, consumed = _consume_compound_teacher_segment(segments, index)
+        if keep == "teacher" and teacher_segment:
+            primary_parts.append(teacher_segment)
+            index += consumed
+            continue
+        if _looks_like_room_segment(segment) or looks_like_roomish_subject_text(segment):
+            room_parts.append(_normalize_roomish_segment(segment))
+            index += 1
+            continue
+        if contains_link_text(segment):
+            link_parts.extend(_extract_links(segment))
+            residual_link_text = normalize_service_tokens(LINK_TEXT_RE.sub(" ", segment)).strip(" ,;/")
+            if residual_link_text:
+                note_parts.append(residual_link_text)
+            index += 1
+            continue
+        if _looks_like_code_segment(segment):
+            note_parts.append(segment)
+            index += 1
+            continue
+        residual, teachers, rooms, links = _extract_entities(segment)
+        room_parts.extend(rooms)
+        link_parts.extend(links)
+        if keep == "teacher":
+            primary_parts.extend(teachers)
+            if residual:
+                if looks_like_teacher_text(residual) or SURNAME_ONLY_RE.fullmatch(residual) or INITIALS_ONLY_RE.fullmatch(residual):
+                    primary_parts.append(residual)
+                elif _looks_like_room_segment(residual) or looks_like_roomish_subject_text(residual):
+                    room_parts.append(_normalize_roomish_segment(residual))
+                else:
+                    note_parts.append(residual)
+        else:
+            primary_parts.extend(rooms)
+            teacher_parts.extend(teachers)
+            if residual:
+                if _looks_like_room_segment(residual) or looks_like_roomish_subject_text(residual) or looks_like_room_text(residual):
+                    primary_parts.append(_normalize_roomish_segment(residual))
+                else:
+                    note_parts.append(residual)
+        index += 1
     if keep == "teacher":
-        teacher_value = _merge_unique([*teachers, residual] if residual and not looks_like_room_text(residual) else teachers)
-        return teacher_value, rooms, links, notes
-    room_value = _merge_unique([*rooms, residual] if residual and not looks_like_teacher_text(residual) else rooms)
-    return room_value, teachers, links, notes
+        return _merge_unique(primary_parts), room_parts, link_parts, note_parts
+    room_value = _merge_unique(primary_parts or room_parts)
+    return room_value, teacher_parts, link_parts, note_parts
 
 
 def _extract_entities(text: str) -> tuple[str, list[str], list[str], list[str]]:
@@ -640,6 +724,9 @@ def _postprocess_structured_fields(cleaned_fields: dict[str, str]) -> dict[str, 
     if MEETING_NOTE_RE.search(updated["subject"]) or MEETING_ABBR_RE.search(updated["subject"]):
         updated["notes"] = _merge_unique([updated["notes"], updated["subject"]])
         updated["subject"] = ""
+    if ABBREVIATED_SUBJECT_RE.fullmatch(updated["subject"]):
+        updated["notes"] = _merge_unique([updated["notes"], updated["subject"]])
+        updated["subject"] = ""
     return updated
 
 
@@ -667,9 +754,23 @@ def _normalize_room_segment(value: str) -> str:
     cleaned = normalize_service_tokens(value)
     if cleaned.casefold() in {"online", "онлайн"}:
         return cleaned
+    trailing_aud_match = re.fullmatch(r"(?iu)(\d{1,4}[A-Za-zА-ЯІЇЄҐ]?)\s*ауд\.?", cleaned)
+    if trailing_aud_match:
+        return f"ауд. {trailing_aud_match.group(1)}"
+    trailing_cab_match = re.fullmatch(r"(?iu)(\d{1,4}[A-Za-zА-ЯІЇЄҐ]?)\s*каб\.?", cleaned)
+    if trailing_cab_match:
+        return f"каб. {trailing_cab_match.group(1)}"
     if cleaned.casefold().startswith(("ауд.", "каб.", "корп.")):
         return cleaned
     return f"ауд. {cleaned}"
+
+
+def _normalize_roomish_segment(value: str) -> str:
+    cleaned = normalize_service_tokens(value)
+    if _looks_like_room_segment(cleaned):
+        return _normalize_room_segment(cleaned)
+    _, room_fragment, _ = _extract_roomish_subject_metadata(cleaned)
+    return room_fragment or cleaned
 
 
 def _extract_trailing_room_from_subject(subject: str) -> tuple[str, str]:

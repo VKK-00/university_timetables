@@ -22,6 +22,9 @@ def test_pipeline_runs_against_real_archive(tmp_path: Path) -> None:
     assert result.exported_files
     assert result.manifest_path.exists()
     assert result.review_queue_path.exists()
+    assert result.review_summary_json_path and result.review_summary_json_path.exists()
+    assert result.review_summary_xlsx_path and result.review_summary_xlsx_path.exists()
+    assert result.run_delta_path and result.run_delta_path.exists()
     assert result.autofix_report_json_path and result.autofix_report_json_path.exists()
     assert result.autofix_report_xlsx_path and result.autofix_report_xlsx_path.exists()
     sample_workbook = load_workbook(result.exported_files[0])
@@ -101,6 +104,9 @@ def test_pipeline_skips_unavailable_assets(monkeypatch, tmp_path: Path) -> None:
     assert len(result.rows) == 1
     assert not result.review_rows
     assert result.exported_files
+    assert result.review_summary_json_path and result.review_summary_json_path.exists()
+    assert result.review_summary_xlsx_path and result.review_summary_xlsx_path.exists()
+    assert result.run_delta_path and result.run_delta_path.exists()
     assert result.autofix_report_json_path and result.autofix_report_json_path.exists()
     assert result.autofix_report_xlsx_path and result.autofix_report_xlsx_path.exists()
     assert result.qa_failures == 1

@@ -91,9 +91,10 @@ TECHNICAL_LABEL_PATTERNS = (
     re.compile(r"(?iu)^лист\d+$"),
     re.compile(r"(?iu)^аркуш\d+$"),
     re.compile(r"(?iu)^переглянути$"),
-    re.compile(r"(?iu)^view(?:[_-].+)?$"),
-    re.compile(r"(?iu)^edit(?:[_-].+)?$"),
+    re.compile(r"(?iu)^view(?:[?=_-].+)?$"),
+    re.compile(r"(?iu)^edit(?:[?=_-].+)?$"),
     re.compile(r"(?iu)^gid[_=-]?\d+$"),
+    re.compile(r"(?iu)^\w+\?usp=.*$"),
 )
 URLISH_TEXT_PATTERNS = (
     re.compile(r"(?iu)\bhttps?\s*:\s*/\s*/"),
@@ -116,6 +117,8 @@ ROOMISH_SUBJECT_PATTERNS = (
     re.compile(r"(?iu)^лаб\.?\s*(?:кяф\s*)?\d{2,4}$"),
     re.compile(r"(?iu)^\d{2,4}\s*/\s*(?:л|л\.|лек|лекція|пр|пр\.|практ|лаб|лаб\.|сем|сем\.)$"),
     re.compile(r"(?iu)^(?:кяф|каф)\s*\d{2,4}$"),
+    re.compile(r"(?iu)^\d{2,4}\s*ауд\.?$"),
+    re.compile(r"(?iu)^ауд\.?\s*\d{2,4}$"),
 )
 KNOWN_SOURCE_LABELS = {
     "fit.knu.ua": "Факультет інформаційних технологій",
@@ -430,15 +433,21 @@ def infer_asset_label_from_locator(locator: str) -> str:
             lowered = part.casefold()
             if lowered in {"view", "edit", "pubhtml", "export", "download", "file", "d"}:
                 continue
+            if looks_like_storage_identifier(part):
+                continue
             candidates.append(Path(part).stem)
     else:
-        candidates.append(Path(locator).stem)
+        stem = Path(locator).stem
+        if not looks_like_storage_identifier(stem):
+            candidates.append(stem)
 
     for candidate in candidates:
         text = candidate.replace("_", " ").replace("-", " ")
         text = re.sub(r"(?<=[A-Za-z])(?=[А-ЯІЇЄҐа-яіїєґ])", " ", text)
         text = re.sub(r"(?<=[А-ЯІЇЄҐа-яіїєґ])(?=[A-Za-z])", " ", text)
         text = normalize_whitespace(text)
+        if looks_like_storage_identifier(text.replace(" ", "")):
+            continue
         if is_meaningful_label(text):
             return text
     return ""
