@@ -63,6 +63,10 @@ SERVICE_TEXT_PATTERNS = (
     re.compile(r"(?iu)\bграфік\b"),
     re.compile(r"(?iu)\bсписки\s+груп\b"),
     re.compile(r"(?iu)\bтеоретичне\s+навчання\b"),
+    re.compile(r"(?iu)\bдень\s+самостійної\s+роботи\b"),
+    re.compile(r"(?iu)\bкурс\s+за\s+вибором\b"),
+    re.compile(r"(?iu)\bдисциплін\w*\s+вільного\s+вибору\b"),
+    re.compile(r"(?iu)\bіноземна\s+мова\s*:\s*нормативний\s+курс\b"),
     re.compile(r"(?iu)\bінформаційний\s+проспект\b"),
     re.compile(r"(?iu)\bправила\s+прийому\b"),
     re.compile(r"(?iu)\bнаукові\s+керівники\b"),
@@ -82,6 +86,16 @@ SERVICE_TEXT_PATTERNS = (
     re.compile(r"(?iu)\bнавчально-методичн"),
     re.compile(r"(?iu)\bстудентів\s+по\s+кафедрах\b"),
     re.compile(r"(?iu)\bнавчальний\s+рік\s+за\s+спеціальністю\b"),
+)
+COMPACT_SERVICE_MARKERS = (
+    "деньсамостійноїроботи",
+    "деньсамостiйноїроботи",
+    "курсзавибором",
+    "дисциплінивільноговиборустудента",
+    "дисциплінивільноговибору",
+    "вибірковадисципліна",
+    "вибірковідисципліни",
+    "іноземнамованормативнийкурс",
 )
 TECHNICAL_LABEL_PATTERNS = (
     re.compile(r"(?iu)^pdf(?:-table.*)?$"),
@@ -366,8 +380,14 @@ def looks_like_teacher_text(value: Any) -> bool:
 
 
 def looks_like_service_text(value: Any) -> bool:
-    text = flatten_multiline(value).casefold()
-    return bool(text) and any(pattern.search(text) for pattern in SERVICE_TEXT_PATTERNS)
+    text = flatten_multiline(value)
+    if not text:
+        return False
+    lowered = text.casefold()
+    if any(pattern.search(lowered) for pattern in SERVICE_TEXT_PATTERNS):
+        return True
+    compact = re.sub(r"[\W_]+", "", lowered, flags=re.UNICODE)
+    return bool(compact) and any(marker in compact for marker in COMPACT_SERVICE_MARKERS)
 
 
 def looks_like_garbage_text(value: Any) -> bool:

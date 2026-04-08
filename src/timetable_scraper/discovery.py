@@ -565,7 +565,9 @@ def _should_skip_candidate(*, label: str, resolved: str, asset_kind: str, score:
 def _decode_candidate_filter_text(*, label: str, resolved: str) -> str:
     decoded_label = unquote(label)
     decoded_resolved = unquote(resolved)
-    return f"{decoded_label} {decoded_resolved}"
+    normalized = flatten_multiline(f"{decoded_label} {decoded_resolved}")
+    normalized = re.sub(r"[_-]+", " ", normalized)
+    return flatten_multiline(normalized)
 
 
 def _append_manual_assets(result: DiscoveryResult, source: SourceConfig) -> DiscoveryResult:

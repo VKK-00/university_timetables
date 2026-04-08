@@ -149,6 +149,30 @@ def test_discovery_skips_percent_encoded_non_schedule_assets() -> None:
     assert "https://example.edu/files/%D0%A4%D0%86%D0%A2_%D0%B7%D0%B2%D1%96%D1%82_2020.pdf" not in locators
 
 
+def test_discovery_skips_url_only_percent_encoded_report_assets() -> None:
+    url = "https://example.edu/faculty/schedule"
+    html = """
+    <html><body>
+      <a href="/files/%D0%A4%D0%86%D0%A2_%D0%B7%D0%B2%D1%96%D1%82_2020.pdf">Переглянути</a>
+      <a href="/files/%D1%80%D0%BE%D0%B7%D0%BA%D0%BB%D0%B0%D0%B4_2_%D1%81%D0%B5%D0%BC.pdf">Переглянути</a>
+    </body></html>
+    """
+    session = FakeSession({url: html})
+    source = SourceConfig(
+        kind="web_page",
+        name="faculty-web",
+        url=url,
+        allow_domains=["example.edu"],
+        schedule_keywords=["розклад", "schedule"],
+    )
+
+    result = discover_source(source, session=session)
+    locators = {asset.locator for asset in result.assets}
+
+    assert "https://example.edu/files/%D0%A4%D0%86%D0%A2_%D0%B7%D0%B2%D1%96%D1%82_2020.pdf" not in locators
+    assert "https://example.edu/files/%D1%80%D0%BE%D0%B7%D0%BA%D0%BB%D0%B0%D0%B4_2_%D1%81%D0%B5%D0%BC.pdf" in locators
+
+
 def test_discovery_appends_manual_seed_assets_with_root_provenance() -> None:
     url = "https://example.edu/faculty/schedule"
     html = "<html><body><p>Schedule page</p></body></html>"

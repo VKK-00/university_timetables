@@ -93,3 +93,14 @@
 - [x] Re-run `mypy`
 - [x] Re-run `pytest`
 - [x] Re-run `python -m build`
+
+## Milestone 12 - Early service-row and report noise reduction
+- [x] Filter obvious non-schedule report assets earlier in discovery
+- [x] Drop service-only timetable rows such as self-study-day and elective headers before QA
+- [x] Add regression tests for URL-only report filtering and non-schedule row dropping
+- [x] Re-run `ruff check`
+- [x] Re-run `mypy`
+- [x] Re-run `pytest`
+- [x] Re-run `python -m build`
+- [x] Re-run full production `run`
+- [x] Update `README.md` if the full-run metrics change materially

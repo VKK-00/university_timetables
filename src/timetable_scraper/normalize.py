@@ -67,6 +67,28 @@ NON_CLASS_MARKER_PATTERNS = (
     "вихiдний",
     *SUBJECT_FALLBACK_NOTES_PATTERNS,
 )
+NON_SCHEDULE_ROW_MARKERS = (
+    "деньсамостійноїроботи",
+    "деньсамостiйноїроботи",
+    "курсзавибором",
+    "дисциплінивільноговиборустудента",
+    "дисциплінивільноговибору",
+    "вибірковадисципліна",
+    "вибірковідисципліни",
+    "іноземнамованормативнийкурс",
+)
+NON_SCHEDULE_FRAGMENT_MARKERS = {
+    "самостійної",
+    "самостiйної",
+    "самостійна",
+    "самостiйна",
+    "роботи",
+    "робота",
+    "вибору",
+    "вибіркова",
+    "вибіркові",
+    "вибірковадисципліна",
+}
 
 INFORMATIONAL_NOTE_PATTERNS = (
     "розклад занять",
@@ -168,7 +190,14 @@ def records_from_tabular_rows(
 
 
 def normalize_document(document: ParsedDocument) -> list[NormalizedRow]:
-    return [normalize_record(record, document=document) for sheet in document.sheets for record in sheet.records]
+    rows: list[NormalizedRow] = []
+    for sheet in document.sheets:
+        for record in sheet.records:
+            row = normalize_record(record, document=document)
+            if _should_drop_non_schedule_row(row):
+                continue
+            rows.append(row)
+    return rows
 
 
 def normalize_record(record: RawRecord, *, document: ParsedDocument) -> NormalizedRow:
@@ -339,6 +368,8 @@ def _should_skip_tabular_row(values: dict[str, Any]) -> bool:
         return True
     if meaningful_fields <= {"course"}:
         return True
+    if _looks_like_non_schedule_service_payload(values):
+        return True
     return meaningful_fields <= {"notes", "course"} and _looks_like_informational_note(values.get("notes"))
 
 
@@ -405,6 +436,34 @@ def _looks_like_non_class_marker(value: Any) -> bool:
     return bool(text) and any(pattern in text for pattern in NON_CLASS_MARKER_PATTERNS)
 
 
+def _compact_marker_text(value: Any) -> str:
+    text = flatten_multiline(value).casefold()
+    return re.sub(r"[\W_]+", "", text, flags=re.UNICODE)
+
+
+def _looks_like_non_schedule_service_text(value: Any) -> bool:
+    compact = _compact_marker_text(value)
+    return bool(compact) and any(marker in compact for marker in NON_SCHEDULE_ROW_MARKERS)
+
+
+def _looks_like_non_schedule_fragment(value: Any) -> bool:
+    compact = _compact_marker_text(value)
+    return bool(compact) and compact in NON_SCHEDULE_FRAGMENT_MARKERS
+
+
+def _looks_like_non_schedule_service_payload(values: dict[str, Any]) -> bool:
+    marker_text = " ".join(
+        flatten_multiline(values.get(field))
+        for field in ("subject", "notes", "lesson_type")
+        if flatten_multiline(values.get(field))
+    )
+    if not marker_text:
+        return False
+    if any(flatten_multiline(values.get(field)) for field in ("teacher", "room", "link", "groups")):
+        return False
+    return _looks_like_non_schedule_service_text(marker_text) or _looks_like_non_schedule_fragment(values.get("subject"))
+
+
 def _normalize_non_class_subject(value: Any) -> str:
     text = flatten_multiline(value)
     lowered = text.casefold()
@@ -418,6 +477,15 @@ def _normalize_non_class_subject(value: Any) -> str:
 def _looks_like_informational_note(value: Any) -> bool:
     text = flatten_multiline(value).casefold()
     return bool(text) and any(pattern in text for pattern in INFORMATIONAL_NOTE_PATTERNS)
+
+
+def _should_drop_non_schedule_row(row: NormalizedRow) -> bool:
+    if any(getattr(row, field).strip() for field in ("teacher", "room", "link", "groups")):
+        return False
+    marker_text = " ".join(part for part in (row.subject, row.notes, row.lesson_type, row.raw_excerpt) if part.strip())
+    if _looks_like_non_schedule_service_text(marker_text):
+        return True
+    return _looks_like_non_schedule_fragment(row.subject)
 
 
 def _extract_program_hint(notes: str) -> str:

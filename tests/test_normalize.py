@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from timetable_scraper.normalize import map_headers, normalize_record, records_from_tabular_rows, score_record
-from timetable_scraper.models import DiscoveredAsset, FetchedAsset, NormalizedRow, ParsedDocument, RawRecord
+from timetable_scraper.normalize import map_headers, normalize_document, normalize_record, records_from_tabular_rows, score_record
+from timetable_scraper.models import DiscoveredAsset, FetchedAsset, NormalizedRow, ParsedDocument, ParsedSheet, RawRecord
 from timetable_scraper.qa import partition_rows, refine_group_quality
 from timetable_scraper.utils import clean_numeric_artifact, flatten_multiline, parse_time_value
 
@@ -206,6 +206,21 @@ def test_records_from_tabular_rows_skip_structural_and_informational_rows() -> N
     assert records[0].values["subject"] == "Мікроекономіка"
 
 
+def test_records_from_tabular_rows_skip_non_schedule_service_rows() -> None:
+    rows = [
+        ["Тиждень", "День", "Початок", "Кінець", "Назва предмета", "Примітки", "Курс"],
+        ["Обидва", "П'ятниця", "14:40", "19:15", "Д Е Н Ь С А М О С Т І Й Н О Ї Р О Б О Т И", "", "2"],
+        ["Обидва", "Четвер", "14:40", "16:10", "К у р с з а в и б о р о м :", "", "2"],
+        ["Обидва", "Четвер", "09:30", "10:50", "Мікроекономіка", "", "2"],
+    ]
+
+    records, warnings = records_from_tabular_rows(rows, program="Demo", faculty="FIT", sheet_name="1 курс")
+
+    assert not warnings
+    assert len(records) == 1
+    assert records[0].values["subject"] == "Мікроекономіка"
+
+
 def test_partition_rows_routes_non_class_marker_without_time_slots_to_review() -> None:
     rows = [
         NormalizedRow(
@@ -225,6 +240,61 @@ def test_partition_rows_routes_non_class_marker_without_time_slots_to_review() -
     assert not accepted
     assert len(review) == 1
     assert "missing_time" in review[0].qa_flags
+
+
+def test_normalize_document_drops_non_schedule_service_rows() -> None:
+    asset = DiscoveredAsset(
+        source_name="history-schedule",
+        source_kind="web_page",
+        source_url_or_path="https://history.univ.kiev.ua/studentam/schedule/",
+        asset_kind="pdf",
+        locator="https://history.univ.kiev.ua/files/history.pdf",
+        display_name="history.pdf",
+    )
+    fetched = FetchedAsset(asset=asset, content=b"", content_type="application/pdf", content_hash="abc", resolved_locator="history.pdf")
+    document = ParsedDocument(
+        asset=fetched,
+        sheets=[
+            ParsedSheet(
+                sheet_name="pdf-table-p1-t1",
+                program="Денна форма навчання",
+                faculty="Історичний факультет",
+                records=[
+                    RawRecord(
+                        values={
+                            "program": "Денна форма навчання",
+                            "faculty": "Історичний факультет",
+                            "day": "П'ятниця",
+                            "start_time": "14:40",
+                            "end_time": "19:15",
+                            "subject": "Д Е Н Ь С А М О С Т І Й Н О Ї Р О Б О Т И",
+                        },
+                        row_index=3,
+                        sheet_name="pdf-table-p1-t1",
+                        raw_excerpt="Д Е Н Ь С А М О С Т І Й Н О Ї Р О Б О Т И",
+                    ),
+                    RawRecord(
+                        values={
+                            "program": "Денна форма навчання",
+                            "faculty": "Історичний факультет",
+                            "day": "Четвер",
+                            "start_time": "09:30",
+                            "end_time": "10:50",
+                            "subject": "Історія України",
+                        },
+                        row_index=4,
+                        sheet_name="pdf-table-p1-t1",
+                        raw_excerpt="Історія України",
+                    ),
+                ],
+            )
+        ],
+    )
+
+    rows = normalize_document(document)
+
+    assert len(rows) == 1
+    assert rows[0].subject == "Історія України"
 
 
 def test_normalize_record_extracts_teacher_and_room_from_composite_subject() -> None:
