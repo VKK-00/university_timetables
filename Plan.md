@@ -73,3 +73,23 @@
 - [x] Re-run production `doctor`
 - [x] Re-run production `run`
 - [x] Sync `README.md` to the latest run if metrics change
+
+## Milestone 10 - REX and Journalism backlog reduction
+- [x] Reduce `rex-schedule` PDF false positives caused by dotted lecture markers and slash-heavy wrapped subjects
+- [x] Infer stable end times for Journalism grid rows that currently export `start == end`
+- [x] Re-run `ruff check`
+- [x] Re-run `mypy`
+- [x] Re-run `pytest`
+- [x] Re-run `python -m build`
+- [x] Re-run targeted production `run`
+- [x] Sync `README.md` if the top-line metrics change materially
+
+## Milestone 11 - Full KNU rerun and docs sync
+- [x] Re-run full production `run` for `config/knu_web_schedule.yaml`
+- [x] Stabilize `fit-schedule` in full KNU config with official direct sheet assets
+- [x] Re-run full production `run` after the FIT source fix
+- [x] Update `README.md` if the full-run metrics change materially
+- [x] Re-run `ruff check`
+- [x] Re-run `mypy`
+- [x] Re-run `pytest`
+- [x] Re-run `python -m build`

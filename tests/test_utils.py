@@ -7,8 +7,13 @@ from timetable_scraper.utils import (
     looks_like_technical_label,
     looks_like_urlish_text,
     normalize_day,
+    normalize_service_tokens,
     parse_time_range,
 )
+
+
+def test_normalize_service_tokens_collapses_dotted_lesson_markers() -> None:
+    assert normalize_service_tokens("Course title (lek...........)") == "Course title (lek.)"
 
 
 def test_parse_time_range_supports_compact_pdf_formats() -> None:

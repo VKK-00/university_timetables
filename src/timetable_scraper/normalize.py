@@ -712,6 +712,7 @@ def _postprocess_structured_fields(cleaned_fields: dict[str, str]) -> dict[str, 
     updated["subject"], trailing_program_notes = _peel_subject_program_metadata(updated["subject"])
     if trailing_program_notes:
         updated["notes"] = _merge_unique([updated["notes"], *trailing_program_notes])
+    updated["subject"] = _collapse_wrapped_subject(updated["subject"])
     if looks_like_roomish_subject_text(updated["subject"]):
         updated["subject"], room_fragment, lesson_fragment = _extract_roomish_subject_metadata(updated["subject"])
         if room_fragment:
@@ -794,6 +795,8 @@ def _looks_like_code_segment(value: str) -> bool:
         return True
     if len(compact) >= 6 and compact.isdigit():
         return True
+    if re.fullmatch(r"(?i)[a-z]{3,4}(?:-[a-z]{3,4}){2,3}", compact):
+        return True
     if len(compact) >= 6 and re.fullmatch(r"[A-Za-z0-9._=+-]+", compact):
         return any(character.isalpha() for character in compact) and any(character.isdigit() for character in compact)
     return False
@@ -836,6 +839,32 @@ def _peel_subject_program_metadata(subject: str) -> tuple[str, list[str]]:
     if not re.search(r"(?iu)\b(?:0\d{2}|1\d{2}|E\d)\b", trailing):
         return cleaned, []
     return subject_part, [trailing]
+
+
+def _collapse_wrapped_subject(subject: str) -> str:
+    cleaned = normalize_service_tokens(subject)
+    if cleaned.count(" / ") < 2:
+        return cleaned
+    if (
+        contains_link_text(cleaned)
+        or looks_like_teacher_text(cleaned)
+        or looks_like_room_text(cleaned)
+        or looks_like_roomish_subject_text(cleaned)
+        or _looks_like_code_segment(cleaned)
+        or re.search(r"\d{2}\.\d{2}\.\d{4}", cleaned)
+    ):
+        return cleaned
+    segments = [normalize_service_tokens(segment) for segment in cleaned.split(" / ") if normalize_service_tokens(segment)]
+    if len(segments) < 3:
+        return cleaned
+    if any(not any(character.isalpha() for character in segment) for segment in segments):
+        return cleaned
+    continuation_segments = sum(
+        1 for segment in segments[1:] if segment.startswith("(") or segment[0].islower()
+    )
+    if continuation_segments < len(segments) - 1:
+        return cleaned
+    return normalize_service_tokens(" ".join(segments))
 
 
 def _extract_roomish_subject_metadata(subject: str) -> tuple[str, str, str]:

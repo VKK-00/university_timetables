@@ -347,6 +347,7 @@ def normalize_service_tokens(value: Any) -> str:
     text = text.replace("ауд ", "ауд. ").replace("АУД ", "ауд. ")
     text = re.sub(r"(?iu)\bлек\b", "лек.", text)
     text = re.sub(r"(?iu)\bпракт\b", "практ.", text)
+    text = re.sub(r"(?iu)\b(лек|практ|сем|лаб|lek|prac|sem|lab)\.{2,}", r"\1.", text)
     text = re.sub(r"\s*([|/;])\s*", r" \1 ", text)
     text = re.sub(r"\s+", " ", text).strip(" ,;")
     return text

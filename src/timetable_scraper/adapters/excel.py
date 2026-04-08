@@ -762,12 +762,12 @@ def _build_generic_time_cells(
     for row in range(first_day_row, worksheet.max_row + 1):
         if row in seen_rows:
             continue
+        anchor = merged_lookup.get((row, time_col), (row, time_col, row, time_col))
         text = _expanded_value(worksheet, row, time_col, merged_lookup)
         if not text:
             continue
         start_time, end_time = _parse_generic_time_text(text)
         if start_time and end_time:
-            anchor = merged_lookup.get((row, time_col), (row, time_col, row, time_col))
             for used_row in range(anchor[0], anchor[2] + 1):
                 seen_rows.add(used_row)
             cells.append(
@@ -781,20 +781,27 @@ def _build_generic_time_cells(
                 )
             )
             continue
+        cleaned_text = flatten_multiline(text)
         start_match = GENERIC_PARTIAL_TIME_RE.search(text)
-        next_text = _expanded_value(worksheet, row + 1, time_col, merged_lookup) if row < worksheet.max_row else ""
+        next_row = anchor[2] + 1
+        next_text = _expanded_value(worksheet, next_row, time_col, merged_lookup) if next_row <= worksheet.max_row else ""
         next_match = GENERIC_END_TIME_RE.search(next_text)
-        if start_match and next_match:
+        if start_match and any(separator in cleaned_text for separator in ("-", "–", "—")) and next_match:
             start_time = parse_time_value(start_match.group("start"))
             end_time = parse_time_value(next_match.group("end"))
-            seen_rows.add(row)
-            seen_rows.add(row + 1)
+            next_anchor = (
+                merged_lookup.get((next_row, time_col), (next_row, time_col, next_row, time_col))
+                if next_row <= worksheet.max_row
+                else (next_row, time_col, next_row, time_col)
+            )
+            for used_row in range(anchor[0], max(anchor[2], next_anchor[2]) + 1):
+                seen_rows.add(used_row)
             cells.append(
                 GridCell(
                     text=f"{start_time}-{end_time}",
                     kind="time",
-                    min_row=row,
-                    max_row=row + 1,
+                    min_row=anchor[0],
+                    max_row=max(anchor[2], next_anchor[2]),
                     min_col=time_col,
                     max_col=time_col,
                 )
@@ -805,31 +812,33 @@ def _build_generic_time_cells(
             worksheet,
             merged_lookup,
             time_col=time_col,
-            start_row=row + 1,
+            start_row=anchor[2] + 1,
             current_time=single_time,
         )
-        if single_time and next_single_time and "-" not in text:
-            for used_row in range(row, next_time_row):
+        if single_time and next_single_time and not any(separator in cleaned_text for separator in ("-", "–", "—")):
+            max_row = max(anchor[2], next_time_row - 1)
+            for used_row in range(anchor[0], max_row + 1):
                 seen_rows.add(used_row)
             cells.append(
                 GridCell(
                     text=f"{single_time}-{_subtract_minutes(next_single_time, 10)}",
                     kind="time",
-                    min_row=row,
-                    max_row=max(row, next_time_row - 1),
+                    min_row=anchor[0],
+                    max_row=max_row,
                     min_col=time_col,
                     max_col=time_col,
                 )
             )
             continue
-        if single_time and "-" not in text:
-            seen_rows.add(row)
+        if single_time and not any(separator in cleaned_text for separator in ("-", "–", "—")):
+            for used_row in range(anchor[0], anchor[2] + 1):
+                seen_rows.add(used_row)
             cells.append(
                 GridCell(
                     text=f"{single_time}-{_add_minutes(single_time, 80)}",
                     kind="time",
-                    min_row=row,
-                    max_row=row,
+                    min_row=anchor[0],
+                    max_row=anchor[2],
                     min_col=time_col,
                     max_col=time_col,
                 )

@@ -459,6 +459,55 @@ def test_normalize_record_moves_meeting_codes_out_of_subject() -> None:
     assert "ІК: 884 766 8136 КД:" in row.notes
 
 
+def test_normalize_record_moves_hyphenated_join_code_out_of_subject() -> None:
+    asset = DiscoveredAsset(
+        source_name="fixture",
+        source_kind="web_page",
+        source_url_or_path="https://example.edu/schedule",
+        asset_kind="pdf",
+        locator="https://example.edu/rex.pdf",
+        display_name="rex.pdf",
+    )
+    fetched = FetchedAsset(asset=asset, content=b"", content_type="application/pdf", content_hash="abc", resolved_locator="rex.pdf")
+    record = RawRecord(
+        values={
+            "program": "Demo",
+            "faculty": "REX",
+            "day": "Monday",
+            "start_time": "09:30",
+            "end_time": "10:50",
+            "subject": "Security systems / operation and support / practice methods (lek.) / ugb-wppy-tnj",
+        },
+        row_index=5,
+        sheet_name="pdf-table",
+        raw_excerpt="Security systems / operation and support / practice methods (lek.) / ugb-wppy-tnj",
+    )
+
+    row = normalize_record(record, document=ParsedDocument(asset=fetched, sheets=[]))
+
+    assert row.subject == "Security systems operation and support practice methods (lek.)"
+    assert "ugb-wppy-tnj" in row.notes
+
+
+def test_partition_rows_keeps_wrapped_rex_subject_with_lesson_marker() -> None:
+    row = NormalizedRow(
+        program="Demo",
+        faculty="REX",
+        week_type="Both",
+        day="Monday",
+        start_time="09:30",
+        end_time="10:50",
+        subject="Testing and expertise / of information security means / (lek.)",
+        confidence=0.98,
+    )
+
+    accepted, review = partition_rows([row], threshold=0.74)
+
+    assert len(accepted) == 1
+    assert not review
+    assert "inconsistent_columns" not in accepted[0].qa_flags
+
+
 def test_normalize_record_does_not_infer_abbreviated_subject_from_notes() -> None:
     asset = DiscoveredAsset(
         source_name="fit-schedule",

@@ -128,7 +128,7 @@ def analyze_row_quality(row: NormalizedRow) -> NormalizedRow:
         flags.append("garbage_text")
     if subject and any(token in subject.casefold() for token in ("?pwd=", "?p=", ".us")):
         flags.append("garbage_text")
-    if subject and subject.count(" / ") >= 2:
+    if subject and subject.count(" / ") >= 2 and not _looks_like_wrapped_multiline_subject(subject):
         flags.append("inconsistent_columns")
     if subject and re.search(r"\d{2}\.\d{2}\.\d{4}", subject):
         flags.append("inconsistent_columns")
@@ -191,6 +191,30 @@ def _looks_like_fragment_subject(subject: str) -> bool:
     if re.fullmatch(r"\([^)]{1,12}\)\s*\d{1,4}", stripped):
         return True
     return False
+
+
+def _looks_like_wrapped_multiline_subject(subject: str) -> bool:
+    stripped = subject.strip()
+    if stripped.count(" / ") < 2:
+        return False
+    if (
+        contains_link_text(stripped)
+        or looks_like_teacher_text(stripped)
+        or looks_like_room_text(stripped)
+        or looks_like_roomish_subject_text(stripped)
+        or TRAILING_ROOM_RE.search(stripped)
+        or re.search(r"\d{2}\.\d{2}\.\d{4}", stripped)
+    ):
+        return False
+    segments = [segment.strip() for segment in stripped.split(" / ") if segment.strip()]
+    if len(segments) < 3:
+        return False
+    if any(not any(character.isalpha() for character in segment) for segment in segments):
+        return False
+    continuation_segments = sum(
+        1 for segment in segments[1:] if segment.startswith("(") or segment[0].islower()
+    )
+    return continuation_segments >= len(segments) - 1 and bool(LESSON_TEXT_RE.search(stripped))
 
 
 def _has_implausible_time(start_time: str, end_time: str, subject: str = "") -> bool:

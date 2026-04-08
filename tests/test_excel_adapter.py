@@ -161,10 +161,12 @@ def test_generic_grid_workbook_supports_days_with_dates() -> None:
     worksheet["C2"] = "група 1"
     worksheet["A4"] = "Понеділок (02.09.2019)"
     worksheet["B4"] = "14:10"
+    worksheet.merge_cells("B4:B5")
     worksheet["C4"] = "Вступ до журналістики"
     worksheet["C5"] = "доц. Іваненко І.І."
     worksheet["A6"] = "Вівторок (03.09.2019)"
     worksheet["B6"] = "15:50"
+    worksheet.merge_cells("B6:B7")
     worksheet["C6"] = "Медіаправо"
     worksheet["A8"] = "Середа (04.09.2019)"
     worksheet["B8"] = "17:30"
@@ -194,6 +196,8 @@ def test_generic_grid_workbook_supports_days_with_dates() -> None:
     assert records
     assert records[0].values["day"] == "Понеділок"
     assert records[0].values["start_time"] == "14:10"
+    assert records[0].values["end_time"] == "15:40"
+    assert all(record.values["start_time"] != record.values["end_time"] for record in records)
 
 
 def test_generic_grid_workbook_skips_mid_sheet_headers_and_room_only_cells() -> None:

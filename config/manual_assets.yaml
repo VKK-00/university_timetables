@@ -1,4 +1,11 @@
 sources:
+  fit-schedule:
+    - url: https://docs.google.com/spreadsheets/d/1A0pNHgJde18io4jz4SJn2Q2poDxAVVMjG_4gLi4lXm8/edit?usp=sharing
+      display_name: FIT official semester 1 workbook
+      asset_kind: google_sheet
+    - url: https://docs.google.com/spreadsheets/d/e/2PACX-1vS4WZHYWuhCpVhFiOY-uCCDPZBu0RUG-tCW2j0ZeQkiFlyObt2FTY_XivI0KD7xPF7EYu55CfErsv6T/pubhtml
+      display_name: FIT official semester 2 workbook
+      asset_kind: google_sheet
   csc-schedule:
     - url: https://docs.google.com/spreadsheets/d/1JbzM1hG5SDQoBKyF1TEceZSFQhuebHJE/edit?usp=sharing
       display_name: CSC official semester 1 2025-2026 workbook
