@@ -1,4 +1,4 @@
-# Plan
+﻿# Plan
 
 ## Milestone 1 - Baseline and gap analysis
 - [x] Inspect the current automated QA and normalization pipeline
@@ -180,6 +180,20 @@
 - [x] Drop unresolved metadata-only rows that carry no subject and no slot context after merge
 - [x] Repair split teacher surnames where a subject starts with a short surname fragment and the teacher field contains the lowercase remainder with initials
 - [x] Add regression tests for orphan metadata drops, blank row drops, and split teacher-prefix repair
+- [x] Re-run `ruff check`
+- [x] Re-run `mypy`
+- [x] Re-run `pytest`
+- [x] Re-run `python -m build`
+- [x] Re-run full production `run`
+- [x] Update `README.md` if metrics change materially
+
+## Milestone 21 - Short-subject and bad-workbook cleanup
+- [x] Demote shortened or service-only `subject` values such as `дист.`, `асист.`, `(пр)`, `1 підгр.`, and session-only markers when no discipline name survives
+- [x] Move session markers and distance-format tokens out of valid `subject` values into `notes` or `lesson_type` when a real discipline name exists
+- [x] Strip schedule-header noise from `groups` and related auxiliary fields so exported rows do not carry `Р О З К Л А Д`-style fragments
+- [x] Reject bad user-facing program labels such as slot names, group labels, `uploads`, `РОЗКЛАД`, `«Затверджую»`, meeting-code tokens, and query-fragment labels before workbook export
+- [x] Prevent tiny bad workbook buckets by re-bucketing recoverable rows or demoting unrecoverable rows to `review`
+- [x] Add regression tests for short-subject demotion, session-only demotion, valid subject plus session marker cleanup, bad program labels, and history/geo-style header pollution
 - [x] Re-run `ruff check`
 - [x] Re-run `mypy`
 - [x] Re-run `pytest`

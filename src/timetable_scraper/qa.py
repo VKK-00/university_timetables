@@ -8,22 +8,29 @@ from openpyxl import Workbook, load_workbook
 
 from .models import NormalizedRow, WorkbookQaSheetSummary, WorkbookQaSummary
 from .utils import (
+    coalesce_program_label,
     coalesce_label,
     contains_link_text,
+    humanize_source_name,
+    infer_asset_label_from_locator,
     ensure_parent,
     json_dumps,
     looks_like_admin_text,
+    looks_like_bad_program_label,
+    looks_like_forbidden_subject_text,
     looks_like_technical_label,
     looks_like_garbage_text,
     looks_like_room_text,
     looks_like_roomish_subject_text,
     looks_like_service_text,
     looks_like_teacher_text,
+    normalize_service_tokens,
 )
 
 
 BODY_COLUMN_COUNT = 12
 HARD_FAIL_FLAGS = {
+    "bad_program_label",
     "missing_day",
     "missing_time",
     "missing_subject",
@@ -47,6 +54,14 @@ ABBREVIATED_SUBJECT_RE = re.compile(r"(?iu)^(?:ст|ас|доц|проф|вик�
 
 LONG_PRACTICE_SUBJECT_RE = re.compile(
     "(?iu)\\b(?:\\u043f\\u0440\\u0430\\u043a\\u0442\\u0438\\u043a\\w+|internship|practice)\\b"
+)
+TINY_BAD_PROGRAM_PATTERNS = (
+    re.compile(r"(?iu)^розклад\b"),
+    re.compile(r"(?iu)^начитка!?$"),
+    re.compile(r"(?iu)^постій"),
+    re.compile(r"(?iu)^увага"),
+    re.compile(r"(?iu)^початок\s+занять"),
+    re.compile(r"(?iu)^навчання\s+з\s+використанням"),
 )
 
 
@@ -129,6 +144,8 @@ def analyze_row_quality(row: NormalizedRow) -> NormalizedRow:
         flags.append("inconsistent_columns")
     if subject and looks_like_service_text(subject):
         flags.append("service_text_subject")
+    if subject and looks_like_forbidden_subject_text(subject):
+        flags.append("service_text_subject")
     if subject and looks_like_garbage_text(subject):
         flags.append("garbage_text")
     if subject and any(token in subject.casefold() for token in ("?pwd=", "?p=", ".us")):
@@ -181,6 +198,39 @@ def analyze_row_quality(row: NormalizedRow) -> NormalizedRow:
     return row
 
 
+def sanitize_export_rows(accepted: list[NormalizedRow], review: list[NormalizedRow]) -> tuple[list[NormalizedRow], list[NormalizedRow]]:
+    sanitized: list[NormalizedRow] = []
+    pending_review = list(review)
+
+    for row in accepted:
+        resolved_program = _resolve_program_label(row)
+        if not resolved_program:
+            row.qa_flags = list(dict.fromkeys([*row.qa_flags, "bad_program_label"]))
+            row.qa_severity = "fail"
+            pending_review.append(row)
+            continue
+        if resolved_program != row.program:
+            row.program = resolved_program
+            row.autofix_actions = list(dict.fromkeys([*row.autofix_actions, "program_label_recovered"]))
+        sanitized.append(row)
+
+    final_rows: list[NormalizedRow] = []
+    buckets: dict[tuple[str, str], list[NormalizedRow]] = defaultdict(list)
+    for row in sanitized:
+        buckets[(row.faculty, row.program)].append(row)
+
+    for bucket_rows in buckets.values():
+        if _should_demote_tiny_program_bucket(bucket_rows):
+            for row in bucket_rows:
+                row.qa_flags = list(dict.fromkeys([*row.qa_flags, "bad_program_label"]))
+                row.qa_severity = "fail"
+                pending_review.append(row)
+            continue
+        final_rows.extend(bucket_rows)
+
+    return final_rows, pending_review
+
+
 def _looks_like_fragment_subject(subject: str) -> bool:
     stripped = subject.strip()
     if not stripped:
@@ -196,6 +246,76 @@ def _looks_like_fragment_subject(subject: str) -> bool:
     if re.fullmatch(r"\([^)]{1,12}\)\s*\d{1,4}", stripped):
         return True
     return False
+
+
+def _resolve_program_label(row: NormalizedRow) -> str:
+    course_label = _course_as_program_label(row.course)
+    return coalesce_program_label(
+        row.program,
+        row.groups,
+        course_label,
+        infer_asset_label_from_locator(row.asset_locator),
+        row.sheet_name,
+        _program_hint_from_notes(row.notes),
+        humanize_source_name(row.source_name),
+    )
+
+
+def _course_as_program_label(course: str) -> str:
+    cleaned = normalize_service_tokens(course)
+    if not cleaned:
+        return ""
+    if re.fullmatch(r"\d{1,2}", cleaned):
+        return f"{cleaned} курс"
+    if re.fullmatch(r"(?iu)\d{1,2}\s*курс", cleaned):
+        return cleaned
+    return ""
+
+
+def _program_hint_from_notes(notes: str) -> str:
+    cleaned = normalize_service_tokens(notes)
+    if not cleaned:
+        return ""
+    if len(cleaned) < 6:
+        return ""
+    if contains_link_text(cleaned):
+        return ""
+    if looks_like_room_text(cleaned):
+        return ""
+    if looks_like_teacher_text(cleaned):
+        return ""
+    if looks_like_service_text(cleaned):
+        return ""
+    if re.search(r"\d{2}\.\d{2}\.\d{4}", cleaned):
+        return ""
+    if looks_like_bad_program_label(cleaned):
+        return ""
+    return cleaned
+
+
+def _should_demote_tiny_program_bucket(rows: list[NormalizedRow]) -> bool:
+    if len(rows) > 3 or not rows:
+        return False
+    program = rows[0].program
+    if looks_like_bad_program_label(program):
+        return True
+    if any(pattern.search(program) for pattern in TINY_BAD_PROGRAM_PATTERNS):
+        return True
+    if len(program) >= 70:
+        return True
+    generic_labels = {
+        "",
+        "unknown program",
+        "невідома програма",
+    }
+    generic_labels.update(
+        {
+            humanize_source_name(rows[0].source_name).casefold(),
+            rows[0].source_name.casefold(),
+            rows[0].faculty.casefold(),
+        }
+    )
+    return program.casefold() in generic_labels
 
 
 def _looks_like_wrapped_multiline_subject(subject: str) -> bool:
@@ -275,6 +395,8 @@ def _audit_single_workbook(path: Path) -> WorkbookQaSummary:
     technical_name = coalesce_label(path.stem, fallback="")
     if not technical_name or looks_like_technical_label(path.stem):
         workbook_issues.append("technical_file_name")
+    if looks_like_bad_program_label(path.stem):
+        workbook_issues.append("bad_program_label")
 
     for sheet in workbook.worksheets:
         row_count = 0
@@ -313,7 +435,7 @@ def _audit_single_workbook(path: Path) -> WorkbookQaSummary:
                 issue_counter["implausible_time"] += 1
         if row_count == 0:
             issue_counter["empty_sheet"] += 1
-        elif row_count == 1 and looks_like_technical_label(path.stem):
+        elif row_count <= 3 and (looks_like_technical_label(path.stem) or looks_like_bad_program_label(path.stem)):
             issue_counter["suspicious_small_sheet"] += 1
 
         total_rows += row_count

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import requests
 import pytest
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
 
 from timetable_scraper.config import load_config
 from timetable_scraper.models import AppConfig, DiscoveredAsset, DiscoveryResult, FetchedAsset, NormalizedRow
@@ -65,14 +65,17 @@ def test_pipeline_skips_unavailable_assets(monkeypatch, tmp_path: Path) -> None:
         resolved_locator="good.xlsx",
     )
     good_row = NormalizedRow(
-        program="Demo",
+        program="Algorithms",
         faculty="FIT",
         week_type="Обидва",
         day="Понеділок",
         start_time="09:30",
         end_time="10:50",
-        subject="Алгоритми",
+        subject="Theory of algorithms",
+        groups="Algorithms",
         confidence=1.0,
+        source_name="good",
+        asset_locator=good_asset.locator,
     )
 
     def fake_fetch(asset, session, cache_dir):
@@ -87,7 +90,21 @@ def test_pipeline_skips_unavailable_assets(monkeypatch, tmp_path: Path) -> None:
         manifest_path.write_text("", encoding="utf-8")
         review_path.write_text("", encoding="utf-8")
         exported = output_dir / "demo.xlsx"
-        exported.write_text("", encoding="utf-8")
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "Algorithms"
+        sheet["A1"] = "Algorithms"
+        sheet["A2"] = "Тиждень"
+        sheet["B2"] = "День"
+        sheet["C2"] = "Початок"
+        sheet["D2"] = "Кінець"
+        sheet["E2"] = "Назва предмета"
+        sheet["A3"] = "Обидва"
+        sheet["B3"] = "Понеділок"
+        sheet["C3"] = "09:30"
+        sheet["D3"] = "10:50"
+        sheet["E3"] = "Theory of algorithms"
+        workbook.save(exported)
         return [exported], manifest_path, review_path
 
     monkeypatch.setattr(
@@ -109,7 +126,7 @@ def test_pipeline_skips_unavailable_assets(monkeypatch, tmp_path: Path) -> None:
     assert result.run_delta_path and result.run_delta_path.exists()
     assert result.autofix_report_json_path and result.autofix_report_json_path.exists()
     assert result.autofix_report_xlsx_path and result.autofix_report_xlsx_path.exists()
-    assert result.qa_failures == 1
+    assert result.qa_failures == 0
 
 
 def test_pipeline_cleans_previous_output_dir(tmp_path: Path, monkeypatch) -> None:

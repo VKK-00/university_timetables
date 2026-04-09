@@ -51,6 +51,9 @@ TIME_RANGE_RE = re.compile(
 )
 STORAGE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{16,}$")
 NUMERIC_TOKEN_RE = re.compile(r"^\d+(?:[._-]\d+)*$")
+DATE_OR_TIME_LABEL_RE = re.compile(r"(?iu)^\d{2}\.\d{2}\.\d{4}(?:\s+\d{1,2}[:._]\d{2})?$")
+MEETING_CODE_RE = re.compile(r"(?iu)^[a-z]{3}-[a-z]{4}-[a-z]{3,4}$")
+OPAQUE_CODE_LABEL_RE = re.compile(r"^[A-Za-z0-9]{10,}(?:\.\d+)?$")
 LINK_TEXT_RE = re.compile(r"(?iu)(https?://\S+|(?:zoom|teams|meet)(?:[\w./:@?=#&%-]+)?)")
 ROOM_TEXT_RE = re.compile(
     r"(?iu)\b(?:ауд\.?\s*[\w./-]+|аудитор(?:ія|iя)\s*[\w./-]+|каб\.?\s*[\w./-]+|корп(?:ус|\.)?\s*[\w./-]+|online|онлайн)\b"
@@ -109,6 +112,69 @@ TECHNICAL_LABEL_PATTERNS = (
     re.compile(r"(?iu)^edit(?:[?=_-].+)?$"),
     re.compile(r"(?iu)^gid[_=-]?\d+$"),
     re.compile(r"(?iu)^\w+\?usp=.*$"),
+    re.compile(r"(?iu)^uploads$"),
+    re.compile(r"(?iu)^wp[-_\s]*content$"),
+    re.compile(r"(?iu)^spreadsheets?$"),
+    re.compile(r"(?iu)^files?$"),
+    re.compile(r"(?iu)^upload$"),
+)
+BAD_PROGRAM_LABEL_PATTERNS = (
+    re.compile(r"(?iu)^uploads$"),
+    re.compile(r"(?iu)^upload$"),
+    re.compile(r"(?iu)^wp[-_\s]*content$"),
+    re.compile(r"(?iu)^spreadsheets?$"),
+    re.compile(r"(?iu)^files?$"),
+    re.compile(r"(?iu)^schedule$"),
+    re.compile(r"(?iu)^«?\s*затверджую\s*»?$"),
+    re.compile(r"(?iu)^розклад(?:\s+занять)?$"),
+    re.compile(r"(?iu)^(?:денна|заочна)\s+форма\s+навчання$"),
+    re.compile(r"(?iu)^\d+\s*пара\b.*(?:\d{1,2}[:.]\d{2})"),
+    re.compile(r"(?iu)^(?:[ivx]+|\d+)\s+група$"),
+    re.compile(r"(?iu)^[12]\s*підгр\.?$"),
+    re.compile(r"(?iu)^\d+\s*курс$"),
+    re.compile(r"(?iu)^(?:\d+\s+){1,3}[A-Za-z0-9+/=_-]{6,}$"),
+    re.compile(r"(?iu)^начитка!?$"),
+    re.compile(r"(?iu)^постійний(?:\s+розклад)?!?$"),
+    re.compile(r"(?iu)^постійне!?$"),
+    re.compile(r"(?iu)^списки?\s+груп$"),
+    re.compile(r"(?iu)^початок\s+занять.*$"),
+    re.compile(r"(?iu)^навчання\s+з\s+використанням.*$"),
+    re.compile(r"(?iu)^увага[!.\s].*$"),
+    re.compile(r"(?iu)^[а-яіїєґ'’ʼ-]+\s+факультету$"),
+    re.compile(r"(?iu)^інституту\s+журналістики.*$"),
+)
+BAD_PROGRAM_COMPACT_MARKERS = {
+    "розклад",
+    "розкладзанять",
+    "деннаформанавчання",
+    "заочнаформанавчання",
+    "затверджую",
+    "wpcontent",
+    "spreadsheets",
+    "spreadsheet",
+    "upload",
+    "uploads",
+    "files",
+    "file",
+    "спискигруп",
+    "начитка",
+    "постійний",
+    "постійне",
+}
+FORBIDDEN_SUBJECT_PATTERNS = (
+    re.compile(r"(?iu)^дист\.?$"),
+    re.compile(r"(?iu)^дистанц\.?$"),
+    re.compile(r"(?iu)^дистанційно$"),
+    re.compile(r"(?iu)^асист\.?$"),
+    re.compile(r"(?iu)^\((?:пр|л|лаб|сем)\)\s*\d*$"),
+    re.compile(r"(?iu)^[12]\s*підгр\.?$"),
+    re.compile(r"(?iu)^комісія$"),
+    re.compile(r"(?iu)^блок$"),
+    re.compile(r"(?iu)^на\s+\d{1,2}[:.]\d{2}$"),
+    re.compile(r"(?iu)^(?:іспит|залік|захист|екзамен)$"),
+    re.compile(r"(?iu)^самостійна\s+робота$"),
+    re.compile(r"(?iu)^самост[іi]й[-\s/]*н\w*(?:\s*/\s*|\s+)робот\w*$"),
+    re.compile(r"(?iu)^день\s+самост[іi]йної\s+роботи$"),
 )
 URLISH_TEXT_PATTERNS = (
     re.compile(r"(?iu)\bhttps?\s*:\s*/\s*/"),
@@ -279,6 +345,16 @@ def looks_like_technical_label(value: Any) -> bool:
     text = flatten_multiline(value)
     if not text:
         return False
+    if DATE_OR_TIME_LABEL_RE.fullmatch(text):
+        return True
+    if MEETING_CODE_RE.fullmatch(text):
+        return True
+    if " " not in text and "?" in text and "=" in text:
+        return True
+    if " " not in text and "=" in text and "&" in text and re.search(r"[A-Za-z]", text):
+        return True
+    if re.search(r"(?iu)\b(?:passcode|pwd=|ідентифікатор\s+конференц\w*|код\s+доступ\w*)\b", text):
+        return True
     return any(pattern.search(text) for pattern in TECHNICAL_LABEL_PATTERNS)
 
 
@@ -325,6 +401,108 @@ def coalesce_label(*candidates: Any, fallback: str = "") -> str:
         if is_meaningful_label(text):
             return text
     return flatten_multiline(fallback)
+
+
+def looks_like_bad_program_label(value: Any) -> bool:
+    text = normalize_service_tokens(value)
+    if not text:
+        return False
+    compact = re.sub(r"[\W_]+", "", text.casefold(), flags=re.UNICODE)
+    if re.fullmatch(r"(?iu)\d{1,2}\s*курс", text):
+        return False
+    if looks_like_storage_identifier(text.replace(" ", "")):
+        return True
+    if looks_like_urlish_text(text):
+        return True
+    if looks_like_technical_label(text):
+        return True
+    if looks_like_admin_text(text):
+        return True
+    if re.fullmatch(r"(?iu)(?:[ivxlcdmі]+|\d+)\s+група", text):
+        return True
+    if _looks_like_opaque_code_label(text):
+        return True
+    if _looks_like_technical_program_segments(text):
+        return True
+    if looks_like_garbage_text(text):
+        has_digits = any(character.isdigit() for character in text)
+        has_code_symbols = any(character in "+/=_-;:" for character in text)
+        has_many_latin_caps = bool(re.search(r"[A-Z].*[A-Z]", text)) and bool(re.search(r"[a-z]", text))
+        if has_digits or has_code_symbols or has_many_latin_caps:
+            return True
+    if looks_like_room_text(text) or looks_like_roomish_subject_text(text):
+        return True
+    if any(pattern.fullmatch(text) for pattern in BAD_PROGRAM_LABEL_PATTERNS):
+        return True
+    if compact in BAD_PROGRAM_COMPACT_MARKERS:
+        return True
+    return compact.startswith("розклад") and len(text) <= 24
+
+
+def coalesce_program_label(*candidates: Any, fallback: str = "") -> str:
+    for candidate in candidates:
+        text = normalize_service_tokens(candidate)
+        if not text:
+            continue
+        if looks_like_bad_program_label(text):
+            continue
+        if is_meaningful_label(text):
+            return text
+    fallback_text = normalize_service_tokens(fallback)
+    if fallback_text and not looks_like_bad_program_label(fallback_text) and is_meaningful_label(fallback_text):
+        return fallback_text
+    return ""
+
+
+def _looks_like_opaque_code_label(text: str) -> bool:
+    if not OPAQUE_CODE_LABEL_RE.fullmatch(text):
+        return False
+    has_digits = any(character.isdigit() for character in text)
+    has_upper = any(character.isupper() for character in text)
+    has_lower = any(character.islower() for character in text)
+    return has_digits and has_upper and has_lower
+
+
+def _looks_like_technical_program_segments(text: str) -> bool:
+    segments = [segment.strip(" .") for segment in re.split(r"\s*;\s*", text) if segment.strip(" .")]
+    if len(segments) < 2:
+        return False
+    technical_segments = sum(1 for segment in segments if _is_technical_program_segment(segment))
+    if technical_segments == 0:
+        return False
+    meaningful_segments = sum(1 for segment in segments if _is_meaningful_program_segment(segment))
+    return meaningful_segments == 0 or technical_segments >= len(segments) - 1
+
+
+def _is_technical_program_segment(segment: str) -> bool:
+    cleaned = normalize_service_tokens(segment).strip(" .")
+    if not cleaned:
+        return False
+    if DATE_OR_TIME_LABEL_RE.fullmatch(cleaned):
+        return True
+    if MEETING_CODE_RE.fullmatch(cleaned):
+        return True
+    if _looks_like_opaque_code_label(cleaned):
+        return True
+    if cleaned.casefold() in {".com", "com"}:
+        return True
+    if looks_like_room_text(cleaned):
+        return True
+    if looks_like_urlish_text(cleaned):
+        return True
+    if looks_like_technical_label(cleaned):
+        return True
+    return False
+
+
+def _is_meaningful_program_segment(segment: str) -> bool:
+    cleaned = normalize_service_tokens(segment)
+    if not cleaned:
+        return False
+    if _is_technical_program_segment(cleaned):
+        return False
+    words = re.findall(r"(?iu)[A-Za-zА-ЯІЇЄҐа-яіїєґ'’ʼ-]{3,}", cleaned)
+    return bool(words) and sum(len(word) for word in words) >= 6 and not looks_like_admin_text(cleaned)
 
 
 def slugify_filename(value: str, fallback: str = "untitled") -> str:
@@ -419,6 +597,13 @@ def looks_like_garbage_text(value: Any) -> bool:
     return False
 
 
+def looks_like_forbidden_subject_text(value: Any) -> bool:
+    text = normalize_service_tokens(value)
+    if not text:
+        return False
+    return any(pattern.fullmatch(text) for pattern in FORBIDDEN_SUBJECT_PATTERNS)
+
+
 def excerpt_from_values(values: dict[str, Any], limit: int = 6) -> str:
     parts = [flatten_multiline(v) for v in values.values() if flatten_multiline(v)]
     return " | ".join(parts[:limit])
@@ -468,6 +653,8 @@ def infer_asset_label_from_locator(locator: str) -> str:
         text = re.sub(r"(?<=[А-ЯІЇЄҐа-яіїєґ])(?=[A-Za-z])", " ", text)
         text = normalize_whitespace(text)
         if looks_like_storage_identifier(text.replace(" ", "")):
+            continue
+        if looks_like_bad_program_label(text):
             continue
         if is_meaningful_label(text):
             return text
