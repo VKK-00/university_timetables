@@ -217,7 +217,7 @@ def normalize_document(document: ParsedDocument) -> list[NormalizedRow]:
             if _should_drop_non_schedule_row(row):
                 continue
             rows.append(row)
-    return rows
+    return _merge_metadata_only_rows(rows)
 
 
 def normalize_record(record: RawRecord, *, document: ParsedDocument) -> NormalizedRow:
@@ -509,6 +509,59 @@ def _should_drop_non_schedule_row(row: NormalizedRow) -> bool:
     if _looks_like_non_schedule_service_text(marker_text):
         return True
     return _looks_like_non_schedule_fragment(row.subject)
+
+
+def _merge_metadata_only_rows(rows: list[NormalizedRow]) -> list[NormalizedRow]:
+    if not rows:
+        return rows
+    survivors: list[NormalizedRow] = []
+    consumed_ids: set[int] = set()
+    for row in rows:
+        row_id = id(row)
+        if row_id in consumed_ids:
+            continue
+        if not _is_metadata_only_row(row):
+            survivors.append(row)
+            continue
+        candidates = [candidate for candidate in rows if id(candidate) not in consumed_ids and _can_absorb_metadata_row(candidate, row)]
+        if len(candidates) != 1:
+            survivors.append(row)
+            continue
+        target = candidates[0]
+        target.teacher = _merge_unique([target.teacher, row.teacher])
+        target.room = _merge_unique([target.room, row.room])
+        target.link = _merge_unique([target.link, row.link], separator=" ")
+        target.notes = _merge_unique([target.notes, row.notes])
+        target.autofix_actions = list(dict.fromkeys([*target.autofix_actions, "slot_metadata_merged"]))
+        consumed_ids.add(row_id)
+    return survivors
+
+
+def _is_metadata_only_row(row: NormalizedRow) -> bool:
+    return not row.subject.strip() and any(value.strip() for value in (row.teacher, row.room, row.link, row.notes))
+
+
+def _can_absorb_metadata_row(candidate: NormalizedRow, metadata_row: NormalizedRow) -> bool:
+    if candidate is metadata_row or not candidate.subject.strip():
+        return False
+    if candidate.sheet_name != metadata_row.sheet_name:
+        return False
+    if candidate.day != metadata_row.day or candidate.start_time != metadata_row.start_time or candidate.end_time != metadata_row.end_time:
+        return False
+    return _slot_context_matches(candidate.course, metadata_row.course) and _slot_context_matches(candidate.groups, metadata_row.groups)
+
+
+def _slot_context_matches(left: str, right: str) -> bool:
+    left_clean = _normalize_slot_context(left)
+    right_clean = _normalize_slot_context(right)
+    if not left_clean or not right_clean:
+        return True
+    return left_clean == right_clean or left_clean in right_clean or right_clean in left_clean
+
+
+def _normalize_slot_context(value: str) -> str:
+    cleaned = normalize_service_tokens(value).casefold()
+    return re.sub(r"[\W_]+", "", cleaned, flags=re.UNICODE)
 
 
 def _extract_program_hint(notes: str) -> str:

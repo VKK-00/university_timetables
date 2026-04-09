@@ -165,3 +165,13 @@
 - [x] Re-run `python -m build`
 - [x] Re-run full production `run`
 - [x] Update `README.md` if the full-run metrics change materially
+
+## Milestone 19 - Metadata-only slot merge
+- [x] Merge metadata-only normalized rows into a single matching subject row for the same slot when the match is unambiguous
+- [x] Add regression tests for law-style `teacher/room only` continuation rows and keep ambiguous multi-subject slots untouched
+- [x] Re-run `ruff check`
+- [x] Re-run `mypy`
+- [x] Re-run `pytest`
+- [x] Re-run `python -m build`
+- [x] Re-run full production `run`
+- [x] Update `README.md` if the full-run metrics change materially
