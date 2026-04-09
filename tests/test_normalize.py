@@ -221,6 +221,21 @@ def test_records_from_tabular_rows_skip_non_schedule_service_rows() -> None:
     assert records[0].values["subject"] == "Мікроекономіка"
 
 
+def test_records_from_tabular_rows_skip_non_schedule_service_rows_even_with_course_context() -> None:
+    rows = [
+        ["Тиждень", "День", "Початок", "Кінець", "Назва предмета", "Примітки", "Курс"],
+        ["Обидва", "Субота", "08:00", "12:40", "ДЕНЬ САМОСТІЙНОЇ РОБОТИ", "", "2"],
+        ["Обидва", "П'ятниця", "11:20", "12:40", "Курс за вибором: Оцінка бізнесу", "", "2"],
+        ["Обидва", "Четвер", "09:30", "10:50", "Мікроекономіка", "", "2"],
+    ]
+
+    records, warnings = records_from_tabular_rows(rows, program="Demo", faculty="Econom", sheet_name="Лист1")
+
+    assert not warnings
+    assert len(records) == 1
+    assert records[0].values["subject"] == "Мікроекономіка"
+
+
 def test_partition_rows_routes_non_class_marker_without_time_slots_to_review() -> None:
     rows = [
         NormalizedRow(
@@ -295,6 +310,83 @@ def test_normalize_document_drops_non_schedule_service_rows() -> None:
 
     assert len(rows) == 1
     assert rows[0].subject == "Історія України"
+
+
+def test_normalize_record_repairs_short_or_reversed_time_slot() -> None:
+    asset = DiscoveredAsset(
+        source_name="econom-schedule",
+        source_kind="web_page",
+        source_url_or_path="https://econom.knu.ua/for_students/schedule/rozklad/",
+        asset_kind="google_sheet",
+        locator="https://docs.google.com/spreadsheets/d/test/edit#gid=0",
+        display_name="econom.xlsx",
+    )
+    fetched = FetchedAsset(
+        asset=asset,
+        content=b"",
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        content_hash="econom",
+        resolved_locator="econom.xlsx",
+    )
+    record = RawRecord(
+        values={
+            "program": "ПБД",
+            "faculty": "Економічний факультет",
+            "day": "Понеділок",
+            "start_time": "17:20",
+            "end_time": "07:50",
+            "subject": "Комерціалізація підприємницької ідеї",
+            "course": "2",
+        },
+        row_index=7,
+        sheet_name="ПБД",
+        raw_excerpt="17:20 | 07:50 | Комерціалізація підприємницької ідеї",
+    )
+
+    row = normalize_record(record, document=ParsedDocument(asset=fetched, sheets=[]))
+
+    assert row.start_time == "17:20"
+    assert row.end_time == "18:40"
+    assert "end_time_repaired" in row.autofix_actions
+
+
+def test_normalize_record_infers_subject_from_elective_note() -> None:
+    asset = DiscoveredAsset(
+        source_name="econom-schedule",
+        source_kind="web_page",
+        source_url_or_path="https://econom.knu.ua/for_students/schedule/rozklad/",
+        asset_kind="google_sheet",
+        locator="https://docs.google.com/spreadsheets/d/test/edit#gid=0",
+        display_name="econom.xlsx",
+    )
+    fetched = FetchedAsset(
+        asset=asset,
+        content=b"",
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        content_hash="econom",
+        resolved_locator="econom.xlsx",
+    )
+    record = RawRecord(
+        values={
+            "program": "Фінансовий бізнес",
+            "faculty": "Економічний факультет",
+            "day": "П'ятниця",
+            "start_time": "11:20",
+            "end_time": "12:40",
+            "teacher": "проф. Чубук Л.П.",
+            "room": "ауд.219",
+            "course": "4",
+            "notes": "Курс за вибором: Оцінка бізнесу; 2",
+        },
+        row_index=9,
+        sheet_name="Лист1",
+        raw_excerpt="Курс за вибором: Оцінка бізнесу",
+    )
+
+    row = normalize_record(record, document=ParsedDocument(asset=fetched, sheets=[]))
+
+    assert row.subject == "Оцінка бізнесу"
+    assert row.notes == "2"
 
 
 def test_normalize_record_extracts_teacher_and_room_from_composite_subject() -> None:

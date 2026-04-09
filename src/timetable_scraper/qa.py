@@ -45,6 +45,11 @@ EXTENDED_DURATION_SUBJECT_RE = re.compile(
 ABBREVIATED_SUBJECT_RE = re.compile(r"(?iu)^(?:ст|ас|доц|проф|викл)\.?$")
 
 
+LONG_PRACTICE_SUBJECT_RE = re.compile(
+    "(?iu)\\b(?:\\u043f\\u0440\\u0430\\u043a\\u0442\\u0438\\u043a\\w+|internship|practice)\\b"
+)
+
+
 def partition_rows(rows: list[NormalizedRow], threshold: float) -> tuple[list[NormalizedRow], list[NormalizedRow]]:
     accepted: list[NormalizedRow] = []
     review: list[NormalizedRow] = []
@@ -235,6 +240,8 @@ def _has_implausible_time(start_time: str, end_time: str, subject: str = "") -> 
             return True
         if duration > 240:
             if EXTENDED_DURATION_SUBJECT_RE.search(subject) and duration <= 360:
+                return False
+            if LONG_PRACTICE_SUBJECT_RE.search(subject) and duration <= 360:
                 return False
             return True
     return False

@@ -104,3 +104,64 @@
 - [x] Re-run `python -m build`
 - [x] Re-run full production `run`
 - [x] Update `README.md` if the full-run metrics change materially
+
+## Milestone 13 - Time-slot repair and non-class row cleanup
+- [x] Repair short or reversed single-slot times before QA when the row otherwise looks like a real class
+- [x] Drop non-class rows even when only `groups` / `course` context remains
+- [x] Add regression tests for implausible time repair and grouped service-row dropping
+- [x] Re-run `ruff check`
+- [x] Re-run `mypy`
+- [x] Re-run `pytest`
+- [x] Re-run `python -m build`
+- [x] Re-run full production `run`
+- [x] Update `README.md` if the full-run metrics change materially
+
+## Milestone 14 - PDF continuation line repair
+- [x] Recognize `teacher + room` and `teacher + room + link` continuation lines in PDF grid tables before they become fake subjects
+- [x] Add regression tests for teacher-room-only PDF lines and multiline PDF continuation records
+- [x] Re-run `ruff check`
+- [x] Re-run `mypy`
+- [x] Re-run `pytest`
+- [x] Re-run `python -m build`
+- [x] Re-run full production `run`
+- [x] Update `README.md` if the full-run metrics change materially
+
+## Milestone 15 - PDF subject-noise cleanup
+- [x] Strip fragmented URL tails and date-time fragments out of PDF-derived `subject` fields before QA
+- [x] Add regression tests for subject cleanup with split link/date fragments
+- [x] Re-run `ruff check`
+- [x] Re-run `mypy`
+- [x] Re-run `pytest`
+- [x] Re-run `python -m build`
+- [x] Re-run full production `run`
+- [x] Update `README.md` if the full-run metrics change materially
+
+## Milestone 16 - Long-practice QA allowance
+- [x] Allow long but plausible practice blocks in QA without dropping the existing hard-fail checks for broken times
+- [x] Add regression tests for long practice durations and still-failing long non-practice durations
+- [x] Re-run `ruff check`
+- [x] Re-run `mypy`
+- [x] Re-run `pytest`
+- [x] Re-run `python -m build`
+- [x] Re-run full production `run`
+- [x] Update `README.md` if the full-run metrics change materially
+
+## Milestone 17 - Leading-teacher subject repair
+- [x] Move leading teacher-like prefixes out of PDF-derived `subject` fields before wrapped-subject collapse
+- [x] Add regression tests for REX-style `teacher / subject / continuation` rows without relaxing unrelated subject QA
+- [x] Re-run `ruff check`
+- [x] Re-run `mypy`
+- [x] Re-run `pytest`
+- [x] Re-run `python -m build`
+- [x] Re-run full production `run`
+- [x] Update `README.md` if the full-run metrics change materially
+
+## Milestone 18 - Teacher-list normalization
+- [x] Normalize broken multi-teacher lists so law-style lecture streams do not fail QA only because titles and names were split apart
+- [x] Add regression tests for title-plus-name chains and compact surnames with initials
+- [x] Re-run `ruff check`
+- [x] Re-run `mypy`
+- [x] Re-run `pytest`
+- [x] Re-run `python -m build`
+- [x] Re-run full production `run`
+- [x] Update `README.md` if the full-run metrics change materially

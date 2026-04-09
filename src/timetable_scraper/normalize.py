@@ -95,6 +95,11 @@ INFORMATIONAL_NOTE_PATTERNS = (
     "з'явиться пізніше",
     "з`явиться пізніше",
 )
+ELECTIVE_SUBJECT_PATTERNS = (
+    re.compile(r"(?iu)^курс\s+за\s+вибором\s*:?\s*(?P<subject>.+)$"),
+    re.compile(r"(?iu)^дисципліни\s+вільного\s+вибору(?:\s+студента)?\s*:?\s*(?P<subject>.+)$"),
+)
+ELECTIVE_TRAILING_NOISE_RE = re.compile(r"(?iu)\s*(?:\+\s*\d+\s*пари?|;\s*\d+.*)$")
 PROGRAM_LABEL_ALIASES = {
     "начитка!": "Начитка",
     "начитка!!!": "Начитка",
@@ -115,6 +120,8 @@ SEGMENT_SPLIT_RE = re.compile(r"\s*(?:\||;|/)\s*")
 SURNAME_ONLY_RE = re.compile(r"(?iu)^[А-ЯІЇЄҐ][а-яіїєґ'-]+$")
 INITIALS_ONLY_RE = re.compile(r"(?iu)^[А-ЯІЇЄҐ]\.\s*[А-ЯІЇЄҐ]\.?$")
 TITLE_ONLY_RE = re.compile(r"(?iu)^(?:проф|доц|ас|асист|викл|ст\.?\s*викл|phd|к\.\s*[юф]\.\s*н|д\.\s*[юф]\.\s*н)\.?$")
+COMPACT_SURNAME_INITIALS_RE = re.compile(r"(?iu)^([А-ЯІЇЄҐ][а-яіїєґ'\-]+)([А-ЯІЇЄҐ]\.\s*[А-ЯІЇЄҐ]\.?)$")
+PERSON_NAME_WITH_INITIALS_RE = re.compile(r"(?iu)^[А-ЯІЇЄҐ][а-яіїєґ'\-]+\s+[А-ЯІЇЄҐ]\.\s*[А-ЯІЇЄҐ]\.?$")
 ROOM_SEGMENT_RE = re.compile(r"(?iu)^(?:\d{3,4}[А-ЯІЇЄҐA-Z]?(?:/\d+)?|[А-ЯІЇЄҐA-Z]-?\d{2,4}|online|онлайн)$")
 CODE_SEGMENT_RE = re.compile(r"(?iu)^(?:meeting id|passcode|код доступу|ідентифікатор конференції|идентификатор конференции|t=\d+)\b|^[A-Za-z0-9+/=_-]{10,}$")
 TRAILING_ROOM_RE = re.compile(
@@ -130,6 +137,19 @@ LESSON_TYPE_PATTERNS = (
     (re.compile(r"(?iu)\b(?:сем|сем\.)\b"), "семінар"),
 )
 ABBREVIATED_SUBJECT_RE = re.compile(r"(?iu)^(?:ст|ас|доц|проф|викл)\.?$")
+LEADING_TEACHER_SEGMENT_RE = re.compile(
+    "(?iu)^(?:(?:\\u043f\\u0440\\u043e\\u0444|\\u0434\\u043e\\u0446|\\u0430\\u0441|\\u0432\\u0438\\u043a\\u043b)\\.?\\s+)?"
+    "[\\u0410-\\u042f\\u0406\\u0407\\u0404\\u0490][\\u0430-\\u044f\\u0456\\u0457\\u0454\\u0491'\\-]+"
+    "\\s+[\\u0410-\\u042f\\u0406\\u0407\\u0404\\u0490]\\.\\s*[\\u0410-\\u042f\\u0406\\u0407\\u0404\\u0490]\\.?$"
+)
+
+
+CYRILLIC_TEXT_RE = re.compile(r"[А-ЯІЇЄҐа-яіїєґ]")
+SUBJECT_FRAGMENT_DATE_RE = re.compile(r"(?iu)^\d{2}\.\d{2}\.\d{4}(?:\s+\d{1,2}[:.]\d{2})?$")
+SUBJECT_FRAGMENT_DATE_LIST_RE = re.compile(r"(?iu)^\[\d{2}\.\d{2}(?:,\s*\d{2}\.\d{2})+\]$")
+SUBJECT_FRAGMENT_LINK_RE = re.compile(
+    r"(?i)(?:\?pwd=|[?&][a-z]{1,5}=|pwd=|zoom|teams|meet|us\d{2}web|knu-ua|meeting\s*id|passcode|\.com\b|\.us\b)"
+)
 
 
 def map_headers(headers: list[Any]) -> dict[str, int]:
@@ -260,10 +280,13 @@ def normalize_record(record: RawRecord, *, document: ParsedDocument) -> Normaliz
     if (not start_time or not end_time) and values["raw_time"]:
         start_time, end_time = parse_time_range(values["raw_time"])
     start_time, end_time = _infer_missing_time_bounds(start_time, end_time, cleaned_fields)
+    start_time, end_time, repaired_time = _repair_implausible_time_bounds(start_time, end_time, cleaned_fields)
     if not parsed_start_time and start_time:
         autofix_actions.append("start_time_inferred")
     if not parsed_end_time and end_time:
         autofix_actions.append("end_time_inferred")
+    if repaired_time:
+        autofix_actions.append(repaired_time)
 
     warnings = list(dict.fromkeys(record.warnings))
     if not cleaned_fields["day"]:
@@ -459,7 +482,7 @@ def _looks_like_non_schedule_service_payload(values: dict[str, Any]) -> bool:
     )
     if not marker_text:
         return False
-    if any(flatten_multiline(values.get(field)) for field in ("teacher", "room", "link", "groups")):
+    if any(flatten_multiline(values.get(field)) for field in ("teacher", "room", "link")):
         return False
     return _looks_like_non_schedule_service_text(marker_text) or _looks_like_non_schedule_fragment(values.get("subject"))
 
@@ -480,7 +503,7 @@ def _looks_like_informational_note(value: Any) -> bool:
 
 
 def _should_drop_non_schedule_row(row: NormalizedRow) -> bool:
-    if any(getattr(row, field).strip() for field in ("teacher", "room", "link", "groups")):
+    if any(getattr(row, field).strip() for field in ("teacher", "room", "link")):
         return False
     marker_text = " ".join(part for part in (row.subject, row.notes, row.lesson_type, row.raw_excerpt) if part.strip())
     if _looks_like_non_schedule_service_text(marker_text):
@@ -577,10 +600,35 @@ def _infer_missing_time_bounds(start_time: str, end_time: str, values: dict[str,
     return start_time, end_time
 
 
+def _repair_implausible_time_bounds(start_time: str, end_time: str, values: dict[str, Any]) -> tuple[str, str, str]:
+    if not start_time or not end_time:
+        return start_time, end_time, ""
+    if not _has_class_payload(values) or _looks_like_non_class_marker(values.get("notes")):
+        return start_time, end_time, ""
+    if _looks_like_non_schedule_service_payload(values):
+        return start_time, end_time, ""
+    start_minutes = _time_to_minutes(start_time)
+    end_minutes = _time_to_minutes(end_time)
+    if start_minutes is None or end_minutes is None:
+        return start_time, end_time, ""
+    duration = end_minutes - start_minutes
+    if duration < 0 or duration <= 20:
+        return start_time, _shift_time(start_time, DEFAULT_SLOT_DURATION_MINUTES), "end_time_repaired"
+    return start_time, end_time, ""
+
+
 def _shift_time(time_value: str, minutes: int) -> str:
     parsed = datetime.strptime(time_value, "%H:%M")
     shifted = parsed + timedelta(minutes=minutes)
     return shifted.strftime("%H:%M")
+
+
+def _time_to_minutes(time_value: str) -> int | None:
+    try:
+        hours, minutes = (int(part) for part in time_value.split(":", 1))
+    except ValueError:
+        return None
+    return hours * 60 + minutes
 
 
 def _cleanup_structured_fields(values: dict[str, str]) -> dict[str, str]:
@@ -772,6 +820,10 @@ def _unique_list(values: Iterable[str]) -> list[str]:
 
 def _postprocess_structured_fields(cleaned_fields: dict[str, str]) -> dict[str, str]:
     updated = dict(cleaned_fields)
+    updated["teacher"] = _normalize_teacher_field(updated["teacher"])
+    updated["subject"], leading_teacher = _extract_leading_teacher_from_subject(updated["subject"])
+    if leading_teacher:
+        updated["teacher"] = _merge_unique([updated["teacher"], leading_teacher])
     updated["subject"], trailing_room, trailing_notes = _peel_subject_tail_metadata(updated["subject"])
     if trailing_room:
         updated["room"] = _merge_unique([updated["room"], trailing_room])
@@ -780,6 +832,9 @@ def _postprocess_structured_fields(cleaned_fields: dict[str, str]) -> dict[str, 
     updated["subject"], trailing_program_notes = _peel_subject_program_metadata(updated["subject"])
     if trailing_program_notes:
         updated["notes"] = _merge_unique([updated["notes"], *trailing_program_notes])
+    updated["subject"], subject_noise_notes = _peel_subject_noise_segments(updated["subject"])
+    if subject_noise_notes:
+        updated["notes"] = _merge_unique([updated["notes"], *subject_noise_notes])
     updated["subject"] = _collapse_wrapped_subject(updated["subject"])
     if looks_like_roomish_subject_text(updated["subject"]):
         updated["subject"], room_fragment, lesson_fragment = _extract_roomish_subject_metadata(updated["subject"])
@@ -812,6 +867,43 @@ def _consume_compound_teacher_segment(segments: list[str], index: int) -> tuple[
 
 def _normalize_initials(value: str) -> str:
     return normalize_service_tokens(value).replace(" ", "")
+
+
+def _normalize_teacher_field(text: str) -> str:
+    segments = _split_segments(text)
+    if not segments:
+        return ""
+    normalized_parts: list[str] = []
+    pending_title = ""
+    for raw_segment in segments:
+        cleaned = _normalize_teacher_segment(raw_segment)
+        if not cleaned:
+            continue
+        if TITLE_ONLY_RE.fullmatch(cleaned):
+            pending_title = cleaned.rstrip(".")
+            continue
+        if pending_title and (_looks_like_teacher_name(cleaned) or looks_like_teacher_text(cleaned)):
+            normalized_parts.append(f"{pending_title}. {cleaned}")
+            pending_title = ""
+            continue
+        normalized_parts.append(cleaned)
+        pending_title = ""
+    return _merge_unique(normalized_parts)
+
+
+def _normalize_teacher_segment(value: str) -> str:
+    cleaned = normalize_service_tokens(value).strip(" ,;")
+    if not cleaned:
+        return ""
+    compact_name_match = COMPACT_SURNAME_INITIALS_RE.fullmatch(cleaned)
+    if compact_name_match:
+        cleaned = f"{compact_name_match.group(1)} {compact_name_match.group(2)}"
+    return normalize_service_tokens(cleaned)
+
+
+def _looks_like_teacher_name(value: str) -> bool:
+    cleaned = _normalize_teacher_segment(value)
+    return bool(cleaned) and bool(PERSON_NAME_WITH_INITIALS_RE.fullmatch(cleaned))
 
 
 def _looks_like_room_segment(value: str) -> bool:
@@ -909,6 +1001,62 @@ def _peel_subject_program_metadata(subject: str) -> tuple[str, list[str]]:
     return subject_part, [trailing]
 
 
+def _peel_subject_noise_segments(subject: str) -> tuple[str, list[str]]:
+    cleaned = normalize_service_tokens(subject)
+    if not cleaned:
+        return "", []
+    segments = _split_segments(cleaned)
+    if not segments:
+        return "", []
+
+    subject_segments: list[str] = []
+    note_segments: list[str] = []
+    for segment in segments:
+        normalized = normalize_service_tokens(segment)
+        if not normalized:
+            continue
+        if _looks_like_subject_noise_segment(normalized):
+            note_segments.append(normalized)
+            continue
+        subject_segments.append(normalized)
+    if not subject_segments:
+        return "", note_segments
+    return _merge_unique(subject_segments, separator=" / "), note_segments
+
+
+def _extract_leading_teacher_from_subject(subject: str) -> tuple[str, str]:
+    cleaned = normalize_service_tokens(subject)
+    segments = _split_segments(cleaned)
+    if len(segments) < 2:
+        return cleaned, ""
+    first = normalize_service_tokens(segments[0]).strip(" ,;")
+    if not first or not LEADING_TEACHER_SEGMENT_RE.fullmatch(first):
+        return cleaned, ""
+    remainder_segments = [normalize_service_tokens(segment) for segment in segments[1:] if normalize_service_tokens(segment)]
+    remainder = _merge_unique(remainder_segments, separator=" / ")
+    if not remainder or looks_like_room_text(remainder) or contains_link_text(remainder):
+        return cleaned, ""
+    return remainder, first
+
+
+def _looks_like_subject_noise_segment(value: str) -> bool:
+    cleaned = normalize_service_tokens(value)
+    if not cleaned:
+        return False
+    if SUBJECT_FRAGMENT_DATE_RE.fullmatch(cleaned):
+        return True
+    if SUBJECT_FRAGMENT_DATE_LIST_RE.fullmatch(cleaned):
+        return True
+    if contains_link_text(cleaned) or MEETING_NOTE_RE.search(cleaned) or MEETING_ABBR_RE.search(cleaned):
+        return True
+    has_cyrillic = bool(CYRILLIC_TEXT_RE.search(cleaned))
+    if not has_cyrillic and SUBJECT_FRAGMENT_LINK_RE.search(cleaned):
+        return True
+    if not has_cyrillic and cleaned.casefold() in {"j", "com"}:
+        return True
+    return False
+
+
 def _collapse_wrapped_subject(subject: str) -> str:
     cleaned = normalize_service_tokens(subject)
     if cleaned.count(" / ") < 2:
@@ -962,6 +1110,10 @@ def _infer_subject_from_notes(cleaned_fields: dict[str, str]) -> tuple[dict[str,
         cleaned = normalize_service_tokens(segment)
         if not cleaned:
             continue
+        elective_subject = _extract_elective_subject_candidate(cleaned)
+        if elective_subject:
+            subject_candidates.append(elective_subject)
+            continue
         if (
             contains_link_text(cleaned)
             or looks_like_teacher_text(cleaned)
@@ -982,6 +1134,26 @@ def _infer_subject_from_notes(cleaned_fields: dict[str, str]) -> tuple[dict[str,
     updated["subject"] = subject_candidates[0]
     updated["notes"] = _merge_unique(residual_notes)
     return updated, True
+
+
+def _extract_elective_subject_candidate(value: str) -> str:
+    cleaned = normalize_service_tokens(value)
+    if not cleaned:
+        return ""
+    for pattern in ELECTIVE_SUBJECT_PATTERNS:
+        match = pattern.fullmatch(cleaned)
+        if not match:
+            continue
+        candidate = normalize_service_tokens(match.group("subject"))
+        candidate = ELECTIVE_TRAILING_NOISE_RE.sub("", candidate).strip(" :;,-+")
+        if not candidate or candidate.isdigit():
+            return ""
+        if looks_like_service_text(candidate) or looks_like_garbage_text(candidate):
+            return ""
+        if not _looks_like_subject_candidate(candidate):
+            return ""
+        return candidate
+    return ""
 
 
 def _detect_cleanup_autofixes(original_fields: dict[str, str], cleaned_fields: dict[str, str]) -> list[str]:

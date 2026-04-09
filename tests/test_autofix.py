@@ -81,5 +81,5 @@ def test_normalize_record_tracks_cleanup_autofixes() -> None:
         ),
         document=_fixture_document(),
     )
-    assert "teacher_from_subject" in row.autofix_actions
     assert "room_from_subject" in row.autofix_actions
+    assert "subject_cleaned" in row.autofix_actions

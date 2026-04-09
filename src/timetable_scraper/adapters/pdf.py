@@ -24,6 +24,12 @@ CODE_RE = re.compile(r"(?i)^[A-ZА-ЯІЇЄҐ]\d+(?:\.\d+)?\b|^\d{3}\s+[А-Яа-
 PDF_TIME_RANGE_RE = re.compile(
     "(?P<start>(?:\\d{1,2}[:.]\\d{2}|\\d{3,4}|\\d(?:\\s+\\d){2,3}))\\s*(?:-|\\u2013|\\u2014)\\s*(?P<end>(?:\\d{1,2}[:.]\\d{2}|\\d{3,4}|\\d(?:\\s+\\d){2,3}))"
 )
+ROOM_TOKEN_RE = re.compile(
+    r"(?iu)^(?:(?:ауд\.?|аудиторія|корпус|корп\.|каб\.?)\s*)?(?:\d{2,4}(?:[-/][0-9A-Za-zА-ЯІЇЄҐа-яіїєґ]+)?|online|онлайн)\b"
+)
+TEACHER_SEGMENT_RE = re.compile(
+    r"(?iu)^(?:(?:проф\.?|доц\.?|ас\.?|ст\.?\s*викл\.?|викл\.?|phd\.?|д\.\s*ю\.\s*н\.?|к\.\s*ю\.\s*н\.?|к\.\s*філос\.\s*н\.?)\s+)?[А-ЯІЇЄҐ][а-яіїєґ'-]+\s+[А-ЯІЇЄҐ]\.\s*[А-ЯІЇЄҐ]\."
+)
 
 
 def parse_pdf_asset(fetched_asset: FetchedAsset, *, ocr_enabled: bool) -> ParsedDocument:
@@ -378,6 +384,17 @@ def _build_grid_record_values(
             continue
         if _normalize_day_cell(cleaned) or _extract_time_ranges_from_text(cleaned):
             continue
+        teacher_fragment, room_fragment, link_fragment, note_fragment = _split_teacher_room_link_continuation(cleaned)
+        if teacher_fragment or room_fragment or link_fragment or note_fragment:
+            if teacher_fragment:
+                teacher_parts.append(teacher_fragment)
+            if room_fragment:
+                room_parts.append(room_fragment)
+            if link_fragment:
+                link_parts.append(link_fragment)
+            if note_fragment:
+                note_parts.append(note_fragment)
+            continue
         if LINK_RE.search(cleaned):
             link_parts.append(cleaned)
             continue
@@ -414,6 +431,47 @@ def _build_grid_record_values(
         "notes": _join_unique(note_parts),
     }
     return values
+
+
+def _split_teacher_room_link_continuation(line: str) -> tuple[str, str, str, str]:
+    cleaned = _normalize_pdf_line(line)
+    if not cleaned:
+        return "", "", "", ""
+    teacher_match = TEACHER_SEGMENT_RE.match(cleaned)
+    if not teacher_match:
+        return "", "", "", ""
+
+    teacher = teacher_match.group(0).strip(" ,;/")
+    remainder = cleaned[teacher_match.end() :].strip(" ,;/")
+    if not remainder:
+        return teacher, "", "", ""
+
+    prefix = remainder
+    link = ""
+    room = ""
+    note = ""
+
+    link_match = re.search(r"(?i)https?://\S+|(?:us\d{2}web|knu-ua|zoom|meet|teams)\S*", remainder)
+    if link_match:
+        prefix = remainder[: link_match.start()].strip(" ,;/")
+        link = remainder[link_match.start() :].strip(" ,;/")
+
+    room_match = ROOM_TOKEN_RE.match(prefix)
+    if room_match:
+        room = room_match.group(0).strip(" ,;/")
+        prefix = prefix[room_match.end() :].strip(" ,;/")
+
+    residual = prefix
+    if not residual:
+        return teacher, room, link, note
+    if ROOM_TOKEN_RE.fullmatch(residual):
+        return teacher, residual.strip(" ,;/"), link, note
+    if re.fullmatch(
+        r"(?iu)(?:meeting\s*id|passcode|код\s+доступу|ідентифікатор\s+конференції)[:\s0-9A-Za-z._=-]*",
+        residual,
+    ):
+        return teacher, room, link, residual
+    return "", "", "", ""
 
 
 def _find_rowwise_day_columns(table: list[list[str | None]]) -> tuple[int, dict[int, str]]:
