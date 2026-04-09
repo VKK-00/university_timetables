@@ -117,11 +117,11 @@ PROGRAM_LABEL_ALIASES = {
 FILL_DOWN_FIELDS = ("week_type", "day", "start_time", "end_time")
 DEFAULT_SLOT_DURATION_MINUTES = 80
 SEGMENT_SPLIT_RE = re.compile(r"\s*(?:\||;|/)\s*")
-SURNAME_ONLY_RE = re.compile(r"(?iu)^[А-ЯІЇЄҐ][а-яіїєґ'-]+$")
+SURNAME_ONLY_RE = re.compile(r"(?iu)^[А-ЯІЇЄҐ][а-яіїєґ'’ʼ-]+$")
 INITIALS_ONLY_RE = re.compile(r"(?iu)^[А-ЯІЇЄҐ]\.\s*[А-ЯІЇЄҐ]\.?$")
 TITLE_ONLY_RE = re.compile(r"(?iu)^(?:проф|доц|ас|асист|викл|ст\.?\s*викл|phd|к\.\s*[юф]\.\s*н|д\.\s*[юф]\.\s*н)\.?$")
-COMPACT_SURNAME_INITIALS_RE = re.compile(r"(?iu)^([А-ЯІЇЄҐ][а-яіїєґ'\-]+)([А-ЯІЇЄҐ]\.\s*[А-ЯІЇЄҐ]\.?)$")
-PERSON_NAME_WITH_INITIALS_RE = re.compile(r"(?iu)^[А-ЯІЇЄҐ][а-яіїєґ'\-]+\s+[А-ЯІЇЄҐ]\.\s*[А-ЯІЇЄҐ]\.?$")
+COMPACT_SURNAME_INITIALS_RE = re.compile(r"(?iu)^([А-ЯІЇЄҐ][а-яіїєґ'’ʼ\-]+)([А-ЯІЇЄҐ]\.\s*[А-ЯІЇЄҐ]\.?)$")
+PERSON_NAME_WITH_INITIALS_RE = re.compile(r"(?iu)^[А-ЯІЇЄҐ][а-яіїєґ'’ʼ\-]+\s+[А-ЯІЇЄҐ]\.\s*[А-ЯІЇЄҐ]\.?$")
 ROOM_SEGMENT_RE = re.compile(r"(?iu)^(?:\d{3,4}[А-ЯІЇЄҐA-Z]?(?:/\d+)?|[А-ЯІЇЄҐA-Z]-?\d{2,4}|online|онлайн)$")
 CODE_SEGMENT_RE = re.compile(r"(?iu)^(?:meeting id|passcode|код доступу|ідентифікатор конференції|идентификатор конференции|t=\d+)\b|^[A-Za-z0-9+/=_-]{10,}$")
 TRAILING_ROOM_RE = re.compile(
@@ -139,9 +139,11 @@ LESSON_TYPE_PATTERNS = (
 ABBREVIATED_SUBJECT_RE = re.compile(r"(?iu)^(?:ст|ас|доц|проф|викл)\.?$")
 LEADING_TEACHER_SEGMENT_RE = re.compile(
     "(?iu)^(?:(?:\\u043f\\u0440\\u043e\\u0444|\\u0434\\u043e\\u0446|\\u0430\\u0441|\\u0432\\u0438\\u043a\\u043b)\\.?\\s+)?"
-    "[\\u0410-\\u042f\\u0406\\u0407\\u0404\\u0490][\\u0430-\\u044f\\u0456\\u0457\\u0454\\u0491'\\-]+"
+    "[\\u0410-\\u042f\\u0406\\u0407\\u0404\\u0490][\\u0430-\\u044f\\u0456\\u0457\\u0454\\u0491'’ʼ\\-]+"
     "\\s+[\\u0410-\\u042f\\u0406\\u0407\\u0404\\u0490]\\.\\s*[\\u0410-\\u042f\\u0406\\u0407\\u0404\\u0490]\\.?$"
 )
+SPLIT_TEACHER_PREFIX_RE = re.compile(r"(?iu)^[А-ЯІЇЄҐ][а-яіїєґ]{1,5}[\'’ʼ]$")
+LOWERCASE_TEACHER_REMAINDER_RE = re.compile(r"(?iu)^[а-яіїєґ'’ʼ-]{2,24}\s+[А-ЯІЇЄҐ]\.\s*[А-ЯІЇЄҐ]\.?$")
 
 
 CYRILLIC_TEXT_RE = re.compile(r"[А-ЯІЇЄҐа-яіїєґ]")
@@ -503,6 +505,8 @@ def _looks_like_informational_note(value: Any) -> bool:
 
 
 def _should_drop_non_schedule_row(row: NormalizedRow) -> bool:
+    if not any(getattr(row, field).strip() for field in ("subject", "teacher", "room", "link", "notes", "lesson_type", "groups", "course")):
+        return True
     if any(getattr(row, field).strip() for field in ("teacher", "room", "link")):
         return False
     marker_text = " ".join(part for part in (row.subject, row.notes, row.lesson_type, row.raw_excerpt) if part.strip())
@@ -525,6 +529,9 @@ def _merge_metadata_only_rows(rows: list[NormalizedRow]) -> list[NormalizedRow]:
             continue
         candidates = [candidate for candidate in rows if id(candidate) not in consumed_ids and _can_absorb_metadata_row(candidate, row)]
         if len(candidates) != 1:
+            if _is_orphan_metadata_only_row(row):
+                consumed_ids.add(row_id)
+                continue
             survivors.append(row)
             continue
         target = candidates[0]
@@ -539,6 +546,10 @@ def _merge_metadata_only_rows(rows: list[NormalizedRow]) -> list[NormalizedRow]:
 
 def _is_metadata_only_row(row: NormalizedRow) -> bool:
     return not row.subject.strip() and any(value.strip() for value in (row.teacher, row.room, row.link, row.notes))
+
+
+def _is_orphan_metadata_only_row(row: NormalizedRow) -> bool:
+    return _is_metadata_only_row(row) and not row.groups.strip() and not row.course.strip()
 
 
 def _can_absorb_metadata_row(candidate: NormalizedRow, metadata_row: NormalizedRow) -> bool:
@@ -873,6 +884,7 @@ def _unique_list(values: Iterable[str]) -> list[str]:
 
 def _postprocess_structured_fields(cleaned_fields: dict[str, str]) -> dict[str, str]:
     updated = dict(cleaned_fields)
+    updated["subject"], updated["teacher"] = _repair_split_teacher_prefix(updated["subject"], updated["teacher"])
     updated["teacher"] = _normalize_teacher_field(updated["teacher"])
     updated["subject"], leading_teacher = _extract_leading_teacher_from_subject(updated["subject"])
     if leading_teacher:
@@ -905,6 +917,31 @@ def _postprocess_structured_fields(cleaned_fields: dict[str, str]) -> dict[str, 
         updated["notes"] = _merge_unique([updated["notes"], updated["subject"]])
         updated["subject"] = ""
     return updated
+
+
+def _repair_split_teacher_prefix(subject: str, teacher: str) -> tuple[str, str]:
+    cleaned_subject = normalize_service_tokens(subject)
+    cleaned_teacher = normalize_service_tokens(teacher)
+    if not cleaned_subject or not cleaned_teacher:
+        return cleaned_subject, cleaned_teacher
+    subject_segments = _split_segments(cleaned_subject)
+    teacher_segments = _split_segments(cleaned_teacher)
+    if len(subject_segments) < 2 or not teacher_segments:
+        return cleaned_subject, cleaned_teacher
+    teacher_head = normalize_service_tokens(teacher_segments[0]).strip(" ,;")
+    subject_head = normalize_service_tokens(subject_segments[0]).strip(" ,;")
+    if not SPLIT_TEACHER_PREFIX_RE.fullmatch(subject_head):
+        return cleaned_subject, cleaned_teacher
+    if not LOWERCASE_TEACHER_REMAINDER_RE.fullmatch(teacher_head):
+        return cleaned_subject, cleaned_teacher
+    repaired_subject = _merge_unique(
+        [normalize_service_tokens(segment) for segment in subject_segments[1:] if normalize_service_tokens(segment)],
+        separator=" / ",
+    )
+    if not repaired_subject:
+        return cleaned_subject, cleaned_teacher
+    repaired_teacher = _merge_unique([f"{subject_head}{teacher_head}", *teacher_segments[1:]])
+    return repaired_subject, repaired_teacher
 
 
 def _consume_compound_teacher_segment(segments: list[str], index: int) -> tuple[str, int]:

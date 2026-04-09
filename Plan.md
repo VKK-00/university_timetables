@@ -175,3 +175,14 @@
 - [x] Re-run `python -m build`
 - [x] Re-run full production `run`
 - [x] Update `README.md` if the full-run metrics change materially
+
+## Milestone 20 - Orphan metadata cleanup and split-teacher repair
+- [x] Drop unresolved metadata-only rows that carry no subject and no slot context after merge
+- [x] Repair split teacher surnames where a subject starts with a short surname fragment and the teacher field contains the lowercase remainder with initials
+- [x] Add regression tests for orphan metadata drops, blank row drops, and split teacher-prefix repair
+- [x] Re-run `ruff check`
+- [x] Re-run `mypy`
+- [x] Re-run `pytest`
+- [x] Re-run `python -m build`
+- [x] Re-run full production `run`
+- [x] Update `README.md` if metrics change materially

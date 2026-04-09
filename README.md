@@ -27,12 +27,12 @@
 
 ## Current KNU Coverage / Поточне покриття КНУ
 
-Latest full KNU web run source of truth: April 8, 2026
+Latest full KNU web run source of truth: April 9, 2026
 
 - `139` exported workbooks
-- `44780` accepted rows
-- `1639` review rows
-- `46322` rows with autofixes
+- `44781` accepted rows
+- `1478` review rows
+- `46162` rows with autofixes
 - `0` QA warnings
 - `0` QA failures
 
@@ -45,8 +45,8 @@ Current source statuses:
 Largest parsed sources in the current run:
 
 - `FIT: 27115 accepted, 254 review`
-- `Physics: 7111 accepted, 97 review`
-- `Sociology: 4046 accepted, 130 review`
+- `Physics: 7111 accepted, 67 review`
+- `Sociology: 4046 accepted, 127 review`
 
 Detailed coverage and source-level status are documented in:
 
@@ -188,6 +188,7 @@ Additional guarantees in the current pipeline:
 - `week_type` is always filled; if no reliable week marker exists, the default is `Обидва`
 - `week_source` is preserved in normalized data
 - `autofix_actions` is preserved in normalized data, `manifest.jsonl`, and `review_queue.xlsx`
+- orphan metadata-only rows are dropped when they cannot be merged back into a unique timetable slot safely
 - `run` cleans the target output directory before writing a new result set
 - post-run QA checks every exported workbook automatically
 
