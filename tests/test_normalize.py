@@ -241,7 +241,7 @@ def test_normalize_record_drops_self_study_subject_with_slash_into_review() -> N
     assert "missing_subject" in review[0].qa_flags
 
 
-def test_normalize_record_extracts_group_signal_from_noisy_header_payload() -> None:
+def test_normalize_record_drops_program_like_group_payload_when_header_is_noisy() -> None:
     asset = DiscoveredAsset(
         source_name="fixture",
         source_kind="zip",
@@ -267,7 +267,36 @@ def test_normalize_record_extracts_group_signal_from_noisy_header_payload() -> N
         raw_excerpt="Поведінкові фінанси",
     )
     row = normalize_record(record, document=ParsedDocument(asset=fetched, sheets=[]))
-    assert row.groups == "Корпоративні фінанси"
+    assert row.groups == ""
+
+
+def test_normalize_record_keeps_explicit_cluster_from_noisy_groups() -> None:
+    asset = DiscoveredAsset(
+        source_name="fixture",
+        source_kind="zip",
+        source_url_or_path="fixtures.zip",
+        asset_kind="zip_entry",
+        locator="fixtures.zip::demo.xlsx",
+        display_name="demo.xlsx",
+    )
+    fetched = FetchedAsset(asset=asset, content=b"", content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", content_hash="abc", resolved_locator="demo.xlsx")
+    record = RawRecord(
+        values={
+            "program": "Маркетинг",
+            "faculty": "Економічний факультет",
+            "week_type": "Обидва",
+            "day": "Понеділок",
+            "start_time": "14:30",
+            "end_time": "15:50",
+            "subject": "Бренд-менеджмент",
+            "groups": "Економічний факультет; Міжнародна економіка; Кластер 1(с); https://us02web.zoom.us/j/12345; « » лютого 2026р.",
+        },
+        row_index=3,
+        sheet_name="Лист1",
+        raw_excerpt="Бренд-менеджмент",
+    )
+    row = normalize_record(record, document=ParsedDocument(asset=fetched, sheets=[]))
+    assert row.groups == "Кластер 1(с)"
 
 
 def test_sanitize_export_rows_recovers_program_from_groups_or_asset_label() -> None:

@@ -242,6 +242,8 @@ GROUP_DATE_NOISE_RE = re.compile(r"(?iu)\b\d{4}\b.*\b(?:н\.?р\.?|року)\b")
 GROUP_QUOTED_VALUE_RE = re.compile(r"[«\"](?P<value>[^»\"]{3,})[»\"]")
 GROUP_STUDENT_COUNT_RE = re.compile(r"(?iu)^\d+\s+студент\w+.*$")
 GROUP_YEAR_ONLY_RE = re.compile(r"(?iu)^(?:\d{4}|\d{4}\s*н\.?р\.?)$")
+EXPLICIT_GROUP_VALUE_RE = re.compile(r"(?iu)\b(?:група|підгрупа|кластер|cluster|потік|stream)\b")
+GROUP_CODE_VALUE_RE = re.compile(r"(?iu)^[A-ZА-ЯІЇЄҐ]{1,8}-\d{1,2}[A-ZА-ЯІЇЄҐa-zа-яіїєґ0-9-]{0,8}$")
 SELF_STUDY_SUBJECT_RE = re.compile(r"(?iu)^самост[іi]й[-\s/]*н\w*(?:\s*/\s*|\s+)робот\w*$")
 SELF_STUDY_DAY_RE = re.compile(r"(?iu)^день\s+самост[іi]йної\s+роботи$")
 
@@ -983,7 +985,14 @@ def _cleanup_groups_field(text: str) -> str:
     segments = _split_segments(cleaned)
     if not segments:
         return ""
+    has_noise = (
+        contains_link_text(cleaned)
+        or looks_like_service_text(cleaned)
+        or looks_like_admin_text(cleaned)
+        or GROUP_DATE_NOISE_RE.search(cleaned) is not None
+    )
     kept_segments: list[str] = []
+    explicit_segments: list[str] = []
     for segment in segments:
         normalized = _extract_group_signal_segment(normalize_service_tokens(segment))
         if not normalized:
@@ -991,23 +1000,31 @@ def _cleanup_groups_field(text: str) -> str:
         if _looks_like_group_noise_segment(normalized):
             continue
         kept_segments.append(normalized)
+        if _looks_like_explicit_group_value(normalized):
+            explicit_segments.append(normalized)
+    if explicit_segments:
+        return _merge_unique(explicit_segments)
     kept = _merge_unique(kept_segments)
     if kept:
+        if has_noise and not _looks_like_explicit_group_value(kept):
+            return ""
         return kept
+    if has_noise:
+        return ""
     if _looks_like_group_noise_segment(cleaned):
         return ""
     return cleaned
 
 
 def _extract_group_signal_segment(value: str) -> str:
-    cleaned = normalize_service_tokens(value).strip("()[]{} ")
+    cleaned = normalize_service_tokens(value).strip("[]{} ")
     if not cleaned:
         return ""
     for pattern in GROUP_SIGNAL_PATTERNS:
         match = pattern.fullmatch(cleaned)
         if not match:
             continue
-        candidate = normalize_service_tokens(match.group("value")).strip("()[]{} ")
+        candidate = normalize_service_tokens(match.group("value")).strip("[]{} ")
         if candidate and not _looks_like_group_noise_segment(candidate):
             return candidate
     quoted_match = GROUP_QUOTED_VALUE_RE.search(cleaned)
@@ -1044,6 +1061,15 @@ def _looks_like_group_noise_segment(value: str) -> bool:
     if GROUP_DATE_NOISE_RE.search(cleaned):
         return True
     return any(marker in compact for marker in GROUP_NOISE_MARKERS)
+
+
+def _looks_like_explicit_group_value(value: str) -> bool:
+    cleaned = normalize_service_tokens(value)
+    if not cleaned:
+        return False
+    if EXPLICIT_GROUP_VALUE_RE.search(cleaned):
+        return True
+    return bool(GROUP_CODE_VALUE_RE.fullmatch(cleaned))
 
 
 def _postprocess_structured_fields(cleaned_fields: dict[str, str]) -> dict[str, str]:

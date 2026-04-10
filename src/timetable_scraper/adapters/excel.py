@@ -15,6 +15,7 @@ from ..models import FetchedAsset, ParsedDocument, ParsedSheet, RawRecord
 from ..normalize import records_from_tabular_rows
 from ..utils import (
     DAY_NAMES,
+    looks_like_teacher_text,
     excerpt_from_values,
     flatten_multiline,
     infer_faculty_from_locator,
@@ -60,11 +61,17 @@ FIT_LESSON_TYPES = {
 }
 
 GENERIC_COURSE_RE = re.compile(r"(?i)\b(\d+)\s*курс\b")
-GENERIC_GROUP_RE = re.compile(r"(?i)\b(?:група|підгрупа|subgroup)\b")
+GENERIC_GROUP_RE = re.compile(r"(?iu)\b(?:група|підгрупа|subgroup|кластер|cluster|потік|stream)\b")
 GENERIC_PARTIAL_TIME_RE = re.compile(r"(?P<start>\d{1,2}[:.]\d{2})\s*[-–—]?\s*$")
 GENERIC_END_TIME_RE = re.compile(r"^(?P<end>\d{1,2}[:.]\d{2})$")
 GENERIC_HEADER_LABEL_RE = re.compile(
     r"(?iu)^(?:[ivxіvх]+\s*курс|\d+\s*курс|\d+\s*магістр(?:и|ів)?|івт|астрономія|оптика|фізичне матеріало-\s*знавство)$"
+)
+GENERIC_GROUP_CODE_RE = re.compile(r"(?iu)^[A-ZА-ЯІЇЄҐ]{1,8}-\d{1,2}[A-ZА-ЯІЇЄҐa-zа-яіїєґ0-9-]{0,8}$")
+GENERIC_GROUP_HEADER_NOISE_RE = re.compile(
+    r"(?iu)\b(?:https?://|zoom|teams|meet|економічний факультет|факультет|інститут|навчальний рік|семестр|"
+    r"погоджую|затверджую|декан|настановчої сесії|екзаменаційної сесії|"
+    r"січня|лютого|березня|квітня|травня|червня|липня|серпня|вересня|жовтня|листопада|грудня)\b"
 )
 
 
@@ -339,6 +346,7 @@ def _classify_fit_cell(text: str) -> str:
     if not cleaned or FIT_COUNT_RE.fullmatch(cleaned):
         return "ignore"
     normalized = normalize_header(cleaned)
+    subject_with_teacher = _looks_like_fit_subject_with_embedded_teacher(cleaned)
     if normalized in DAY_OR_TIME_HEADERS or normalize_day(cleaned) in DAY_NAMES.values():
         return "ignore"
     if parse_time_range(cleaned)[0]:
@@ -347,9 +355,11 @@ def _classify_fit_cell(text: str) -> str:
         return "link"
     if looks_like_roomish_subject_text(cleaned):
         return "room"
-    if FIT_ROOM_RE.search(cleaned):
+    if FIT_ROOM_RE.search(cleaned) and not subject_with_teacher and not _looks_like_subject_text(cleaned):
         return "room"
-    if FIT_TEACHER_RE.search(cleaned):
+    if looks_like_teacher_text(cleaned):
+        if subject_with_teacher:
+            return "subject"
         return "teacher"
     if FIT_WEEK_RE.search(cleaned) and not _looks_like_subject_text(cleaned):
         return "week"
@@ -363,6 +373,29 @@ def _classify_fit_cell(text: str) -> str:
 def _looks_like_subject_text(text: str) -> bool:
     lowered = text.casefold()
     return any(marker in lowered for marker in ("(", "лаб", "лек", "пр", "сем", "основи", "архітект", "матем", "комп", "кібер", "інозем"))
+
+
+def _looks_like_fit_subject_with_embedded_teacher(text: str) -> bool:
+    cleaned = flatten_multiline(text)
+    if not cleaned:
+        return False
+    if not looks_like_teacher_text(cleaned):
+        return False
+    teacher_match = re.search(r"(?iu)[А-ЯІЇЄҐ][а-яіїєґ'’ʼ-]+\s+[А-ЯІЇЄҐ]\.\s*[А-ЯІЇЄҐ]\.?", cleaned)
+    if not teacher_match:
+        return False
+    prefix = cleaned[: teacher_match.start()].strip(" ,;/")
+    if len(prefix) < 8:
+        return False
+    if parse_time_range(prefix)[0]:
+        return False
+    if looks_like_roomish_subject_text(prefix):
+        return False
+    if FIT_ROOM_RE.search(prefix) and not _looks_like_subject_text(prefix):
+        return False
+    if _looks_like_fit_noise_text(prefix):
+        return False
+    return _looks_like_subject_text(prefix) or len(prefix.split()) >= 2
 
 
 def _looks_like_fit_noise_text(text: str) -> bool:
@@ -872,7 +905,12 @@ def _build_generic_header_context(
             values.append(cleaned)
         header_map[column] = values
         course_values = [match.group(1) for value in values for match in [GENERIC_COURSE_RE.search(normalize_header(value))] if match]
-        group_values = [value for value in values if GENERIC_GROUP_RE.search(normalize_header(value))]
+        group_values = [
+            sanitized
+            for value in values
+            for sanitized in [_sanitize_generic_group_header_value(value)]
+            if sanitized
+        ]
         course_map[column] = "; ".join(_unique_list(course_values))
         group_map[column] = "; ".join(_unique_list(group_values))
     return {
@@ -955,14 +993,38 @@ def _compose_generic_groups(header_context: dict[str, dict[int, list[str] | str]
         if group_value:
             group_values.append(group_value)
         for header in header_context["headers"].get(column, []):
-            normalized = normalize_header(header)
-            if GENERIC_COURSE_RE.search(normalized):
-                continue
-            if len(header) > 80:
-                continue
-            fallback_headers.append(header)
+            sanitized = _sanitize_generic_group_header_value(header)
+            if sanitized:
+                fallback_headers.append(sanitized)
     values = group_values or fallback_headers
     return "; ".join(_unique_list(values))
+
+
+def _sanitize_generic_group_header_value(value: str) -> str:
+    cleaned = flatten_multiline(value)
+    if not cleaned:
+        return ""
+    segments = [segment.strip(" []{}") for segment in re.split(r"\s*[;|/]\s*", cleaned) if segment.strip(" []{}")]
+    if not segments:
+        segments = [cleaned]
+    candidates = [segment for segment in segments if _looks_like_generic_group_header_candidate(segment)]
+    return "; ".join(_unique_list(candidates))
+
+
+def _looks_like_generic_group_header_candidate(value: str) -> bool:
+    cleaned = flatten_multiline(value)
+    if not cleaned:
+        return False
+    normalized = normalize_header(cleaned)
+    if GENERIC_COURSE_RE.search(normalized):
+        return False
+    if len(cleaned) > 80:
+        return False
+    if GENERIC_GROUP_HEADER_NOISE_RE.search(cleaned):
+        return False
+    if GENERIC_GROUP_RE.search(normalized):
+        return True
+    return bool(GENERIC_GROUP_CODE_RE.fullmatch(cleaned))
 
 
 def _compose_generic_courses(header_context: dict[str, dict[int, list[str] | str]], min_col: int, max_col: int) -> str:

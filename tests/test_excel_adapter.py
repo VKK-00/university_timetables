@@ -8,6 +8,7 @@ from openpyxl import Workbook
 
 from timetable_scraper.adapters.excel import parse_excel_asset
 from timetable_scraper.models import DiscoveredAsset, FetchedAsset
+from timetable_scraper.normalize import normalize_document
 
 WORKBOOKS_DIR = Path(__file__).parent / "fixtures" / "workbooks"
 
@@ -109,6 +110,56 @@ def test_fit_style_grid_workbook_is_parsed() -> None:
     assert record.values["room"] == "109 ауд."
 
 
+def test_fit_style_grid_subject_with_embedded_teacher_is_normalized() -> None:
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "ІПЗ"
+    worksheet["A2"] = "день"
+    worksheet["B2"] = "час"
+    worksheet["C2"] = "1 курс ІПЗ"
+    worksheet.merge_cells("C2:D2")
+    worksheet["C3"] = "група ІПЗ-11"
+    worksheet.merge_cells("C3:D3")
+    worksheet["C4"] = "підгрупа ІПЗ-11/1"
+    worksheet.merge_cells("C4:D4")
+    worksheet["A5"] = "вівторок"
+    worksheet["B5"] = "13:40-15:00"
+    worksheet["C5"] = "Блокчейн технології (Л) Меркулова К. В."
+    worksheet.merge_cells("C5:D5")
+    worksheet["C8"] = "I тиждень"
+    worksheet.merge_cells("C8:D8")
+    worksheet["C10"] = "203 ауд."
+    worksheet["D10"] = "meet"
+
+    buffer = BytesIO()
+    workbook.save(buffer)
+    asset = DiscoveredAsset(
+        source_name="fit-grid",
+        source_kind="google_sheet",
+        source_url_or_path="https://fit.knu.ua/for-students/lessons-schedule",
+        asset_kind="google_sheet",
+        locator="https://docs.google.com/spreadsheets/d/test/edit#gid=0",
+        display_name="fit-grid.xlsx",
+    )
+    fetched = FetchedAsset(
+        asset=asset,
+        content=buffer.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        content_hash="fit-grid-embedded-teacher",
+        resolved_locator="fit-grid-embedded-teacher.xlsx",
+    )
+
+    document = parse_excel_asset(fetched)
+    rows = normalize_document(document)
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.subject == "Блокчейн технології"
+    assert row.teacher == "Меркулова К. В."
+    assert row.lesson_type == "лекція"
+    assert row.room == "ауд. 203"
+
+
 def test_generic_grid_workbook_is_parsed() -> None:
     workbook = Workbook()
     worksheet = workbook.active
@@ -198,6 +249,46 @@ def test_generic_grid_workbook_supports_days_with_dates() -> None:
     assert records[0].values["start_time"] == "14:10"
     assert records[0].values["end_time"] == "15:40"
     assert all(record.values["start_time"] != record.values["end_time"] for record in records)
+
+
+def test_generic_grid_header_noise_does_not_pollute_groups() -> None:
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "Лист1"
+    worksheet["C1"] = "Економічний факультет"
+    worksheet["C2"] = "Міжнародна економіка"
+    worksheet["C3"] = "Кластер 1(с); https://us02web.zoom.us/j/12345; « » лютого 2026р."
+    worksheet["A5"] = "Понеділок"
+    worksheet["B5"] = "12:50-14:10"
+    worksheet["C5"] = "Бренд-менеджмент"
+    worksheet["C6"] = "проф. Длігач А. О."
+    worksheet["A8"] = "Вівторок"
+    worksheet["B8"] = "14:30-15:50"
+    worksheet["C8"] = "Стратегічний маркетинг"
+
+    buffer = BytesIO()
+    workbook.save(buffer)
+    asset = DiscoveredAsset(
+        source_name="econom-schedule",
+        source_kind="google_sheet",
+        source_url_or_path="https://econom.knu.ua/for_students/schedule/rozklad/",
+        asset_kind="google_sheet",
+        locator="https://docs.google.com/spreadsheets/d/test-econ/edit#gid=0",
+        display_name="econom.xlsx",
+    )
+    fetched = FetchedAsset(
+        asset=asset,
+        content=buffer.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        content_hash="generic-grid-groups",
+        resolved_locator="generic-grid-groups.xlsx",
+    )
+
+    document = parse_excel_asset(fetched)
+    rows = normalize_document(document)
+
+    assert len(rows) == 2
+    assert all(row.groups == "Кластер 1(с)" for row in rows)
 
 
 def test_generic_grid_workbook_skips_mid_sheet_headers_and_room_only_cells() -> None:
