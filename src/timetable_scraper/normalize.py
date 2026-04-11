@@ -210,7 +210,7 @@ LEADING_SUBJECT_MARKER_RE = re.compile(
     r"(?iu)^(?:[\[(]?\s*)?(?P<marker>л|л\.|лек|лек\.|лекція|lek|lek\.|lecture|пр|пр\.|практ|практ\.|практична|prac|prac\.|practical|лаб|лаб\.|лабораторна|lab|lab\.|сем|сем\.|семінар|sem|sem\.|seminar)\s*[\])\].,:-]+\s*(?P<rest>.+)$"
 )
 TRAILING_TEACHER_FRAGMENT_RE = re.compile(
-    r"(?iu)^(?P<subject>.+?)\s*[.;,]\s*(?P<teacher>(?:(?:проф|доц|ас|асист|викл|dr|prof)\.?\s+)?[А-ЯІЇЄҐA-Z][А-ЯІЇЄҐA-Zа-яіїєґa-z'’ʼ-]+(?:\s+[А-ЯІЇЄҐA-Z]\.){1,2})$"
+    r"(?iu)^(?P<subject>.+?)\s*[.;,]?\s*(?P<teacher>(?:(?:проф|доц|ас|асист|викл|dr|prof)\.?\s+)?[А-ЯІЇЄҐA-Z][А-ЯІЇЄҐA-Zа-яіїєґa-z'’ʼ-]+(?:\s+[А-ЯІЇЄҐA-Z]\.?\s*){1,2})$"
 )
 SUBJECT_TRAILING_TIME_NOTE_RE = re.compile(r"(?iu)^(?P<subject>.+?)\s+(?P<note>на\s+\d{1,2}[:.]\d{2})$")
 GROUP_NOISE_MARKERS = {
@@ -331,7 +331,7 @@ def normalize_document(document: ParsedDocument) -> list[NormalizedRow]:
             if _should_drop_non_schedule_row(row):
                 continue
             rows.append(row)
-    return _merge_metadata_only_rows(rows)
+    return _merge_subject_continuation_rows(_merge_metadata_only_rows(rows))
 
 
 def normalize_record(record: RawRecord, *, document: ParsedDocument) -> NormalizedRow:
@@ -654,6 +654,77 @@ def _merge_metadata_only_rows(rows: list[NormalizedRow]) -> list[NormalizedRow]:
         target.autofix_actions = list(dict.fromkeys([*target.autofix_actions, "slot_metadata_merged"]))
         consumed_ids.add(row_id)
     return survivors
+
+
+def _merge_subject_continuation_rows(rows: list[NormalizedRow]) -> list[NormalizedRow]:
+    survivors: list[NormalizedRow] = []
+    consumed_ids: set[int] = set()
+    for index, row in enumerate(rows):
+        row_id = id(row)
+        if row_id in consumed_ids:
+            continue
+        if not _can_start_subject_continuation(row):
+            survivors.append(row)
+            continue
+        continuation = _find_subject_continuation_row(rows, index, consumed_ids)
+        if continuation is None:
+            survivors.append(row)
+            continue
+        row.subject = _merge_subject_fragments(row.subject, continuation.subject)
+        row.teacher = _merge_unique([row.teacher, continuation.teacher])
+        row.lesson_type = _normalize_lesson_type_field(_merge_unique([row.lesson_type, continuation.lesson_type]))
+        row.link = _merge_unique([row.link, continuation.link], separator=" ")
+        row.room = _merge_unique([row.room, continuation.room])
+        row.notes = _merge_unique([row.notes, continuation.notes])
+        row.autofix_actions = list(dict.fromkeys([*row.autofix_actions, "subject_continuation_merged"]))
+        consumed_ids.add(id(continuation))
+        survivors.append(row)
+    return survivors
+
+
+def _can_start_subject_continuation(row: NormalizedRow) -> bool:
+    subject = row.subject.strip()
+    if not subject:
+        return False
+    if any(value.strip() for value in (row.teacher, row.lesson_type, row.link, row.room)):
+        return False
+    if subject[0].islower():
+        return False
+    return len(subject.split()) >= 2
+
+
+def _find_subject_continuation_row(
+    rows: list[NormalizedRow],
+    index: int,
+    consumed_ids: set[int],
+) -> NormalizedRow | None:
+    current = rows[index]
+    if index + 1 >= len(rows):
+        return None
+    candidate = rows[index + 1]
+    if id(candidate) in consumed_ids:
+        return None
+    subject = candidate.subject.strip()
+    if not subject or not subject[0].islower():
+        return None
+    if candidate.source_name != current.source_name:
+        return None
+    if candidate.sheet_name != current.sheet_name:
+        return None
+    if candidate.day != current.day or candidate.start_time != current.start_time or candidate.end_time != current.end_time:
+        return None
+    if not _slot_context_matches(current.course, candidate.course):
+        return None
+    if not _slot_context_matches(current.groups, candidate.groups):
+        return None
+    if not any(value.strip() for value in (candidate.teacher, candidate.lesson_type, candidate.link, candidate.room)):
+        return None
+    return candidate
+
+
+def _merge_subject_fragments(left: str, right: str) -> str:
+    merged = f"{left.rstrip(' /')} {right.lstrip('/ ')}"
+    return normalize_service_tokens(merged)
 
 
 def _is_metadata_only_row(row: NormalizedRow) -> bool:

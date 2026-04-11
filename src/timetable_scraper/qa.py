@@ -175,6 +175,8 @@ def analyze_row_quality(row: NormalizedRow) -> NormalizedRow:
         flags.append("garbage_text")
     if subject and ABBREVIATED_SUBJECT_RE.fullmatch(subject):
         flags.append("garbage_text")
+    if subject and _looks_like_fragment_subject(subject):
+        flags.append("inconsistent_columns")
     compact_subject = subject.replace(" ", "")
     if (
         subject
@@ -239,6 +241,8 @@ def sanitize_export_rows(accepted: list[NormalizedRow], review: list[NormalizedR
 def _looks_like_fragment_subject(subject: str) -> bool:
     stripped = subject.strip()
     if not stripped:
+        return True
+    if re.fullmatch(r"(?u)[А-ЯІЇЄҐA-Z]\.\s*[А-ЯІЇЄҐA-Z]\.?", stripped):
         return True
     if stripped[0].islower():
         return True
@@ -322,6 +326,8 @@ def _should_demote_tiny_program_bucket(rows: list[NormalizedRow]) -> bool:
         return False
     if source_name == "iht-schedule" and count_program_codes(program) >= 1:
         return True
+    if source_name == "law-schedule" and len(rows) <= 3 and re.fullmatch(r"(?iu)\d+\s*академ\w*", program):
+        return True
     if looks_like_bad_program_label(program):
         return True
     if any(pattern.search(program) for pattern in TINY_BAD_PROGRAM_PATTERNS):
@@ -333,6 +339,33 @@ def _should_demote_tiny_program_bucket(rows: list[NormalizedRow]) -> bool:
         if looks_like_teacher_text(program):
             return True
         if not any(token in program.casefold() for token in safe_markers):
+            return True
+    if source_name == "phys-schedule" and len(rows) <= 3:
+        if any(
+            looks_like_room_text(row.subject)
+            or looks_like_roomish_subject_text(row.subject)
+            or _looks_like_fragment_subject(row.subject)
+            for row in rows
+        ):
+            return True
+    if source_name == "biomed-schedule" and len(rows) <= 2:
+        if any(_looks_like_fragment_subject(row.subject) for row in rows):
+            return True
+    if source_name == "sociology-schedule" and len(rows) <= 3:
+        lowered = program.casefold()
+        if lowered in {"english", "англ.мова"}:
+            return True
+        if re.fullmatch(r"(?iu)[лпс]-\d+\s*год\.?", program):
+            return True
+        if looks_like_teacher_text(program) or re.fullmatch(r"(?u)[А-ЯІЇЄҐ][А-ЯІЇЄҐ'’ʼ-]+\s+[А-ЯІЇЄҐ]\.(?:\s*[А-ЯІЇЄҐ]\.?)?", program):
+            return True
+        if all(
+            row.notes.strip() and normalize_service_tokens(row.notes) == program
+            for row in rows
+        ) and all(
+            row.subject.strip() and re.fullmatch(r"(?u)[А-ЯІЇЄҐA-Z][А-ЯІЇЄҐA-Z-]{3,}", row.subject.strip())
+            for row in rows
+        ):
             return True
     if source_name == "mechmat-schedule" and len(rows) <= 1:
         if "+" in program or LESSON_TEXT_RE.search(program):
