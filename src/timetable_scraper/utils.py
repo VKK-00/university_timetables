@@ -54,6 +54,11 @@ NUMERIC_TOKEN_RE = re.compile(r"^\d+(?:[._-]\d+)*$")
 DATE_OR_TIME_LABEL_RE = re.compile(r"(?iu)^\d{2}\.\d{2}\.\d{4}(?:\s+\d{1,2}[:._]\d{2})?$")
 MEETING_CODE_RE = re.compile(r"(?iu)^[a-z]{3}-[a-z]{4}-[a-z]{3,4}$")
 OPAQUE_CODE_LABEL_RE = re.compile(r"^[A-Za-z0-9]{10,}(?:\.\d+)?$")
+LATIN_TEACHER_LABEL_RE = re.compile(
+    r"(?u)^(?:(?:dr|prof|professor|associate professor|assistant|lecturer)\.?\s+)?"
+    r"[A-Z][A-Za-z'’ʼ-]+(?:\s+[A-Z][A-Za-z'’ʼ-]+){1,3}$"
+)
+COMPACT_TEACHER_LABEL_RE = re.compile(r"(?u)^[А-ЯІЇЄҐ][а-яіїєґ'’ʼ-]+\s+[А-ЯІЇЄҐ]\.\s*[А-ЯІЇЄҐ]\.?$")
 LINK_TEXT_RE = re.compile(r"(?iu)(https?://\S+|(?:zoom|teams|meet)(?:[\w./:@?=#&%-]+)?)")
 ROOM_TEXT_RE = re.compile(
     r"(?iu)\b(?:ауд\.?\s*[\w./-]+|аудитор(?:ія|iя)\s*[\w./-]+|каб\.?\s*[\w./-]+|корп(?:ус|\.)?\s*[\w./-]+|online|онлайн)\b"
@@ -119,6 +124,9 @@ TECHNICAL_LABEL_PATTERNS = (
     re.compile(r"(?iu)^upload$"),
 )
 BAD_PROGRAM_LABEL_PATTERNS = (
+    re.compile(r"(?iu)^розклад\b.*$"),
+    re.compile(r"(?iu)^rozklad\b.*$"),
+    re.compile(r"(?iu)^schedule(?:\s+of\s+classes)?$"),
     re.compile(r"(?iu)^uploads$"),
     re.compile(r"(?iu)^upload$"),
     re.compile(r"(?iu)^wp[-_\s]*content$"),
@@ -142,10 +150,12 @@ BAD_PROGRAM_LABEL_PATTERNS = (
     re.compile(r"(?iu)^увага[!.\s].*$"),
     re.compile(r"(?iu)^[а-яіїєґ'’ʼ-]+\s+факультету$"),
     re.compile(r"(?iu)^інституту\s+журналістики.*$"),
+    re.compile(r"(?iu)^dr\.?\s+[A-ZА-ЯІЇЄҐ].*$"),
 )
 BAD_PROGRAM_COMPACT_MARKERS = {
     "розклад",
     "розкладзанять",
+    "rozklad",
     "деннаформанавчання",
     "заочнаформанавчання",
     "затверджую",
@@ -160,6 +170,24 @@ BAD_PROGRAM_COMPACT_MARKERS = {
     "начитка",
     "постійний",
     "постійне",
+}
+PROGRAM_CODE_RE = re.compile(r"(?iu)\b(?:E\d{1,3}|0\d{2}|1\d{2})\b")
+SPACED_WEEKDAY_LABELS = {
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+    "понеділок",
+    "вівторок",
+    "середа",
+    "четвер",
+    "пятниця",
+    "п'ятниця",
+    "субота",
+    "неділя",
 }
 FORBIDDEN_SUBJECT_PATTERNS = (
     re.compile(r"(?iu)^дист\.?$"),
@@ -200,6 +228,7 @@ ROOMISH_SUBJECT_PATTERNS = (
     re.compile(r"(?iu)^\d{2,4}\s*ауд\.?$"),
     re.compile(r"(?iu)^ауд\.?\s*\d{2,4}$"),
 )
+ROOM_LABEL_FRAGMENT_RE = re.compile(r"(?iu)^(?:ауд|каб|корп)\.?$|^(?:\d{2,4}[а-яіїєґa-z]?|[а-яіїєґa-z]-?\d{2,4})$")
 KNOWN_SOURCE_LABELS = {
     "fit.knu.ua": "Факультет інформаційних технологій",
     "phys.knu.ua": "Фізичний факультет",
@@ -407,16 +436,37 @@ def looks_like_bad_program_label(value: Any) -> bool:
     text = normalize_service_tokens(value)
     if not text:
         return False
+    normalized_candidate = normalize_program_candidate(text)
+    if text and not normalized_candidate:
+        return True
+    stripped = normalized_candidate.lstrip(" .,:;-")
     compact = re.sub(r"[\W_]+", "", text.casefold(), flags=re.UNICODE)
-    if re.fullmatch(r"(?iu)\d{1,2}\s*курс", text):
-        return False
-    if looks_like_storage_identifier(text.replace(" ", "")):
+    if " " not in text and looks_like_storage_identifier(text):
         return True
     if looks_like_urlish_text(text):
         return True
     if looks_like_technical_label(text):
         return True
     if looks_like_admin_text(text):
+        return True
+    if len(text) >= 20 and any(
+        marker in text.casefold()
+        for marker in ("розклад", "начитк", "постійн", "тимчасов", "увага", "навчання з використанням")
+    ):
+        return True
+    if _looks_like_month_only_program_label(text) or _looks_like_date_week_program_label(text):
+        return True
+    if count_program_codes(text) >= 2:
+        return True
+    if re.search(r"(?u)\b\d{3}\s+\d{3}\s+\d{4}\b", text):
+        return True
+    if re.search(r"(?iu)\b(?:ауд|корп)\.?\b", text):
+        return True
+    if looks_like_teacher_text(stripped) or _looks_like_latin_teacher_label(stripped) or _looks_like_compact_teacher_label(stripped):
+        return True
+    if looks_like_forbidden_subject_text(stripped):
+        return True
+    if _looks_like_non_program_segment_combo(text):
         return True
     if re.fullmatch(r"(?iu)(?:[ivxlcdmі]+|\d+)\s+група", text):
         return True
@@ -428,8 +478,10 @@ def looks_like_bad_program_label(value: Any) -> bool:
         has_digits = any(character.isdigit() for character in text)
         has_code_symbols = any(character in "+/=_-;:" for character in text)
         has_many_latin_caps = bool(re.search(r"[A-Z].*[A-Z]", text)) and bool(re.search(r"[a-z]", text))
-        if has_digits or has_code_symbols or has_many_latin_caps:
+        if (has_digits or has_code_symbols or has_many_latin_caps) and not _looks_like_cohort_label(text):
             return True
+    if _looks_like_room_label_fragment(stripped):
+        return True
     if looks_like_room_text(text) or looks_like_roomish_subject_text(text):
         return True
     if any(pattern.fullmatch(text) for pattern in BAD_PROGRAM_LABEL_PATTERNS):
@@ -441,17 +493,72 @@ def looks_like_bad_program_label(value: Any) -> bool:
 
 def coalesce_program_label(*candidates: Any, fallback: str = "") -> str:
     for candidate in candidates:
-        text = normalize_service_tokens(candidate)
+        text = normalize_program_candidate(candidate)
         if not text:
             continue
         if looks_like_bad_program_label(text):
             continue
         if is_meaningful_label(text):
             return text
-    fallback_text = normalize_service_tokens(fallback)
+    fallback_text = normalize_program_candidate(fallback)
     if fallback_text and not looks_like_bad_program_label(fallback_text) and is_meaningful_label(fallback_text):
         return fallback_text
     return ""
+
+
+def normalize_program_candidate(value: Any) -> str:
+    text = normalize_service_tokens(value).strip(" .,:;-")
+    if not text:
+        return ""
+    segments = [
+        normalize_service_tokens(segment).strip(" .,:;-")
+        for segment in re.split(r"\s*;\s*", text)
+        if normalize_service_tokens(segment).strip(" .,:;-")
+    ]
+    if not segments:
+        return ""
+    if len(segments) == 1:
+        stripped = segments[0].lstrip(". ").strip()
+        if not stripped:
+            return ""
+        if DATE_OR_TIME_LABEL_RE.fullmatch(stripped):
+            return ""
+        if stripped.casefold() in {".com", "com"}:
+            return ""
+        if looks_like_room_text(stripped) or looks_like_roomish_subject_text(stripped) or _looks_like_room_label_fragment(stripped):
+            return ""
+        if looks_like_forbidden_subject_text(stripped):
+            return ""
+        if looks_like_teacher_text(stripped) or _looks_like_latin_teacher_label(stripped) or _looks_like_compact_teacher_label(stripped):
+            return ""
+        if looks_like_technical_label(stripped) or looks_like_urlish_text(stripped):
+            return ""
+        return stripped
+
+    cleaned_segments: list[str] = []
+    for segment in segments:
+        stripped = segment.lstrip(". ").strip(" ,")
+        if not stripped:
+            continue
+        if DATE_OR_TIME_LABEL_RE.fullmatch(stripped):
+            continue
+        if stripped.casefold() in {".com", "com"}:
+            continue
+        if looks_like_room_text(stripped) or looks_like_roomish_subject_text(stripped) or _looks_like_room_label_fragment(stripped):
+            continue
+        if looks_like_forbidden_subject_text(stripped):
+            continue
+        if looks_like_teacher_text(stripped) or _looks_like_latin_teacher_label(stripped) or _looks_like_compact_teacher_label(stripped):
+            continue
+        if looks_like_technical_label(stripped) or looks_like_urlish_text(stripped):
+            continue
+        cleaned_segments.append(stripped)
+
+    if not cleaned_segments:
+        return ""
+    if len(cleaned_segments) == 1:
+        return cleaned_segments[0]
+    return " ; ".join(normalize_whitespace(segment) for segment in cleaned_segments)
 
 
 def _looks_like_opaque_code_label(text: str) -> bool:
@@ -505,6 +612,130 @@ def _is_meaningful_program_segment(segment: str) -> bool:
     return bool(words) and sum(len(word) for word in words) >= 6 and not looks_like_admin_text(cleaned)
 
 
+def _looks_like_non_program_segment_combo(text: str) -> bool:
+    segments = [normalize_service_tokens(segment).strip(" .,:;-") for segment in re.split(r"\s*;\s*", text) if normalize_service_tokens(segment).strip(" .,:;-")]
+    if len(segments) < 2:
+        return False
+    return all(
+        (
+            DATE_OR_TIME_LABEL_RE.fullmatch(segment)
+            or segment.casefold() in {".com", "com"}
+            or looks_like_room_text(segment)
+            or looks_like_roomish_subject_text(segment)
+            or _looks_like_room_label_fragment(segment)
+            or looks_like_forbidden_subject_text(segment)
+            or bool(re.fullmatch(r"(?iu)(?:[ivxlcdmі]+|\d+)\s+група", segment))
+            or looks_like_teacher_text(segment.lstrip(". "))
+            or _looks_like_latin_teacher_label(segment)
+            or _looks_like_compact_teacher_label(segment)
+        )
+        for segment in segments
+    )
+
+
+def _looks_like_room_label_fragment(value: str) -> bool:
+    cleaned = normalize_service_tokens(value)
+    if not cleaned:
+        return False
+    if ROOM_LABEL_FRAGMENT_RE.fullmatch(cleaned):
+        return True
+    return bool(re.fullmatch(r"(?iu)\d{2,4}(?:[-/][\u0430-\u044f\u0456\u0457\u0454\u0491a-z])", cleaned))
+
+
+def _looks_like_compact_teacher_label(value: str) -> bool:
+    cleaned = normalize_service_tokens(value).lstrip(". ").strip()
+    if not cleaned:
+        return False
+    if COMPACT_TEACHER_LABEL_RE.fullmatch(cleaned):
+        return True
+    return bool(
+        re.fullmatch(
+            r"(?u)^[\u0410-\u042f\u0406\u0407\u0404\u0490][\u0430-\u044f\u0456\u0457\u0454\u0491'\u2019\u02bc-]+"
+            r"(?:\s+[\u0410-\u042f\u0406\u0407\u0404\u0490][\u0430-\u044f\u0456\u0457\u0454\u0491'\u2019\u02bc-]+)?"
+            r"\s+[\u0410-\u042f\u0406\u0407\u0404\u0490]\.\s*[\u0410-\u042f\u0406\u0407\u0404\u0490]\.?$",
+            cleaned,
+        )
+    )
+
+
+def _looks_like_latin_teacher_label(value: str) -> bool:
+    cleaned = normalize_service_tokens(value).lstrip(". ").strip()
+    if not cleaned:
+        return False
+    if re.match(r"(?iu)^(?:dr|prof|professor|associate professor|assistant|lecturer)\.?\s+", cleaned):
+        return bool(
+            re.fullmatch(
+                r"(?u)(?:(?:dr|prof|professor|associate professor|assistant|lecturer)\.?\s+)"
+                r"[A-Z][A-Za-z'\u2019\u02bc-]+(?:\s+[A-Z][A-Za-z'\u2019\u02bc-]+){1,3}",
+                cleaned,
+            )
+        )
+    return False
+
+
+def _looks_like_month_only_program_label(value: str) -> bool:
+    cleaned = normalize_service_tokens(value).casefold()
+    if not cleaned:
+        return False
+    tokens = [token for token in re.split(r"[^0-9a-z\u0430-\u044f\u0456\u0457\u0454\u0491]+", cleaned) if token]
+    if not tokens:
+        return False
+    month_stems = (
+        "січ",
+        "лют",
+        "берез",
+        "квіт",
+        "трав",
+        "черв",
+        "лип",
+        "серп",
+        "верес",
+        "жовт",
+        "листоп",
+        "груд",
+    )
+    return all(any(token.startswith(stem) for stem in month_stems) for token in tokens)
+
+
+def _looks_like_date_week_program_label(value: str) -> bool:
+    cleaned = normalize_service_tokens(value).casefold()
+    if not cleaned:
+        return False
+    has_month = any(stem in cleaned for stem in ("січ", "лют", "берез", "квіт", "трав", "черв", "лип", "серп", "верес", "жовт", "листоп", "груд"))
+    has_week = "тиж" in cleaned
+    has_digits = bool(re.search(r"\d", cleaned))
+    return has_month and has_week and has_digits
+
+
+def _looks_like_cohort_label(text: str) -> bool:
+    cleaned = normalize_service_tokens(text)
+    if not cleaned:
+        return False
+    words = re.findall(r"(?u)[A-Za-zА-ЯІЇЄҐа-яіїєґ'’ʼ-]{3,}", cleaned)
+    if len(words) < 2:
+        return False
+    if not re.search(r"\d", cleaned):
+        return False
+    if looks_like_technical_label(cleaned) or looks_like_urlish_text(cleaned):
+        return False
+    return True
+
+
+def count_program_codes(value: Any) -> int:
+    text = normalize_service_tokens(value)
+    if not text:
+        return 0
+    return len(PROGRAM_CODE_RE.findall(text))
+
+
+def looks_like_spaced_weekday_label(value: Any) -> bool:
+    text = normalize_service_tokens(value)
+    if not text or " " not in text:
+        return False
+    compact = re.sub(r"\s+", "", text).casefold()
+    return compact in SPACED_WEEKDAY_LABELS
+
+
 def slugify_filename(value: str, fallback: str = "untitled") -> str:
     text = unicodedata.normalize("NFKD", value)
     text = "".join(ch for ch in text if not unicodedata.combining(ch))
@@ -550,7 +781,12 @@ def contains_link_text(value: Any) -> bool:
 
 
 def looks_like_room_text(value: Any) -> bool:
-    return bool(ROOM_TEXT_RE.search(flatten_multiline(value)))
+    text = flatten_multiline(value)
+    if not text:
+        return False
+    if re.search(r"(?iu)\b(?:\u0430\u0443\u0434\.?\s*[\w./-]+|\u0430\u0443\u0434\u0438\u0442\u043e\u0440(?:\u0456\u044f|i\u044f)\s*[\w./-]+|\u043a\u0430\u0431\.?\s*[\w./-]+|online|\u043e\u043d\u043b\u0430\u0439\u043d)\b", text):
+        return True
+    return bool(re.search(r"(?iu)\b\u043a\u043e\u0440\u043f(?:\u0443\u0441|\.)\s*[\w./-]+", text))
 
 
 def looks_like_teacher_text(value: Any) -> bool:
@@ -562,6 +798,8 @@ def looks_like_service_text(value: Any) -> bool:
     if not text:
         return False
     lowered = text.casefold()
+    if looks_like_spaced_weekday_label(text):
+        return True
     if any(pattern.search(lowered) for pattern in SERVICE_TEXT_PATTERNS):
         return True
     compact = re.sub(r"[\W_]+", "", lowered, flags=re.UNICODE)
@@ -601,6 +839,8 @@ def looks_like_forbidden_subject_text(value: Any) -> bool:
     text = normalize_service_tokens(value)
     if not text:
         return False
+    if looks_like_spaced_weekday_label(text):
+        return True
     return any(pattern.fullmatch(text) for pattern in FORBIDDEN_SUBJECT_PATTERNS)
 
 

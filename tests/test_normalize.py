@@ -359,14 +359,14 @@ def test_sanitize_export_rows_recovers_program_from_groups_or_asset_label() -> N
 
     sanitized, review = sanitize_export_rows(accepted, [])
 
-    assert len(sanitized) >= 3
+    assert len(sanitized) >= 2
     assert sanitized[0].program == "Фізика наносистем"
-    assert any(row.program == "3 курс" for row in sanitized)
     assert all(row.program not in {"uploads", "wp-content", "spreadsheets"} for row in sanitized)
     assert all(not looks_like_bad_program_label(row.program) for row in sanitized)
     assert "program_label_recovered" in sanitized[0].autofix_actions
     assert any("program_label_recovered" in row.autofix_actions for row in sanitized[1:])
     assert all("bad_program_label" in row.qa_flags for row in review)
+    assert len(review) == 2
 
 
 def test_sanitize_export_rows_demotes_unrecoverable_bad_program_label() -> None:
@@ -422,6 +422,16 @@ def test_looks_like_bad_program_label_catches_geo_technical_tails() -> None:
     assert looks_like_bad_program_label("kmj_hs=179&authuser=0&hl=ru")
     assert looks_like_bad_program_label("bbz-nrfu-gne ; 308-а ; 02.03.2026")
     assert looks_like_bad_program_label("yjw-wktj-mrf ; .com")
+    assert looks_like_bad_program_label("dr. VOLODYMYR SUDAKOV")
+    assert looks_like_bad_program_label("ауд. ; ЗАЛІК")
+    assert looks_like_bad_program_label("Rozklad ННІВТ 2 25 26")
+    assert looks_like_bad_program_label("асист.")
+    assert looks_like_bad_program_label(". Губіна К.Є")
+    assert looks_like_bad_program_label("3 курс")
+    assert looks_like_bad_program_label("ІК_ 884 766 8136 КД")
+    assert looks_like_bad_program_label("2 8 вересня (лекціі) 1 ии тиждень")
+    assert looks_like_bad_program_label("СІЧЕНЬ ЛЮТИИ")
+    assert looks_like_bad_program_label("АНГЛ.МОВА . ауд")
     assert not looks_like_bad_program_label("Економічна географія ; Управління розвитком ; туризму та рекреації")
 
 
@@ -495,6 +505,129 @@ def test_sanitize_export_rows_ignores_technical_notes_as_program_hint() -> None:
     assert all(row.program == "Geo Schedule" for row in sanitized)
     assert all(not looks_like_bad_program_label(row.program) for row in sanitized)
     assert all("program_label_recovered" in row.autofix_actions for row in sanitized)
+
+
+def test_sanitize_export_rows_recovers_teacher_like_program_to_sheet_name() -> None:
+    accepted = [
+        NormalizedRow(
+            program="dr. VOLODYMYR SUDAKOV",
+            faculty="Факультет соціології",
+            week_type="Обидва",
+            day="Четвер",
+            start_time="14:00",
+            end_time="15:20",
+            subject="CURRENT ISSUES IN SOCIAL SCIENCES",
+            teacher="проф. СУДАКОВ В.І.",
+            sheet_name="2 mag Sociology 1s 23-24",
+            notes="dr. VOLODYMYR SUDAKOV",
+            source_name="sociology-schedule",
+            asset_locator="https://docs.google.com/spreadsheets/d/demo/edit?usp=sharing",
+        )
+    ]
+
+    sanitized, review = sanitize_export_rows(accepted, [])
+
+    assert not review
+    assert len(sanitized) == 1
+    assert sanitized[0].program == "2 mag Sociology 1s 23-24"
+    assert "program_label_recovered" in sanitized[0].autofix_actions
+
+
+def test_sanitize_export_rows_demotes_unrecoverable_rozklad_program() -> None:
+    accepted = [
+        NormalizedRow(
+            program="Rozklad ННІВТ 2 25 26",
+            faculty="ННІ високих технологій",
+            week_type="Обидва",
+            day="Вівторок",
+            start_time="12:20",
+            end_time="13:55",
+            subject="Академічне письмо англійською мовою",
+            notes="E1 Біологія та біохімія, E3 Хімія",
+            sheet_name="pdf-table-p1-t1",
+            source_name="iht-schedule",
+            asset_locator="https://iht.knu.ua/wp-content/uploads/2026/02/RozkladННІВТ-2-25-26.pdf",
+        )
+    ]
+
+    sanitized, review = sanitize_export_rows(accepted, [])
+
+    assert not sanitized
+    assert len(review) == 1
+    assert "bad_program_label" in review[0].qa_flags
+
+
+def test_sanitize_export_rows_demotes_tiny_fragmented_geo_program() -> None:
+    accepted = [
+        NormalizedRow(
+            program="використання та ; збереження водних",
+            faculty="Географічний факультет",
+            week_type="Обидва",
+            day="Вівторок",
+            start_time="10:35",
+            end_time="12:10",
+            subject="Управління водними ресурсами",
+            sheet_name="pdf-table-p1-t1",
+            source_name="geo-schedule",
+            asset_locator="https://geo.knu.ua/wp-content/uploads/2026/03/rozklad_2-k_2sem_2025-2026.pdf",
+        ),
+        NormalizedRow(
+            program="використання та ; збереження водних",
+            faculty="Географічний факультет",
+            week_type="Обидва",
+            day="Четвер",
+            start_time="10:35",
+            end_time="12:10",
+            subject="Водна політика",
+            sheet_name="pdf-table-p1-t1",
+            source_name="geo-schedule",
+            asset_locator="https://geo.knu.ua/wp-content/uploads/2026/03/rozklad_2-k_2sem_2025-2026.pdf",
+        ),
+    ]
+
+    sanitized, review = sanitize_export_rows(accepted, [])
+
+    assert not sanitized
+    assert len(review) == 2
+    assert all("bad_program_label" in row.qa_flags for row in review)
+
+
+def test_sanitize_export_rows_rejects_bad_note_based_program_hints() -> None:
+    accepted = [
+        NormalizedRow(
+            program="uploads",
+            faculty="Факультет соціології",
+            week_type="Обидва",
+            day="Вівторок",
+            start_time="17:10",
+            end_time="18:30",
+            subject="МЕТОДИ ЗБОРУ СОЦІОЛОГІЧНИХ ДАНИХ",
+            groups="1 група; 2 група",
+            notes="АНГЛ.МОВА . ауд.",
+            sheet_name="1",
+            source_name="sociology-schedule",
+            asset_locator="https://docs.google.com/spreadsheets/d/demo/edit?usp=sharing",
+        ),
+        NormalizedRow(
+            program="Rozklad ННІВТ 2 25 26",
+            faculty="ННІ високих технологій",
+            week_type="Обидва",
+            day="Вівторок",
+            start_time="11:30",
+            end_time="12:50",
+            subject="Психологія спілкування",
+            notes="091 Біологія / та біохімія",
+            sheet_name="pdf-table-p2-t1",
+            source_name="iht-schedule",
+            asset_locator="https://iht.knu.ua/wp-content/uploads/2026/02/RozkladННІВТ-2-25-26.pdf",
+        ),
+    ]
+
+    sanitized, review = sanitize_export_rows(accepted, [])
+
+    assert not sanitized
+    assert len(review) == 2
+    assert all("bad_program_label" in row.qa_flags for row in review)
 
 
 def test_records_from_tabular_rows_fill_down_merged_schedule_values() -> None:
@@ -1347,6 +1480,23 @@ def test_partition_rows_moves_implausible_time_to_review() -> None:
     assert "implausible_time" in review[0].qa_flags
 
 
+def test_partition_rows_moves_spaced_weekday_subject_to_review() -> None:
+    row = NormalizedRow(
+        program="English",
+        faculty="Факультет соціології",
+        week_type="Обидва",
+        day="Понеділок",
+        start_time="09:00",
+        end_time="10:20",
+        subject="M O N D A Y",
+        confidence=0.98,
+    )
+    accepted, review = partition_rows([row], threshold=0.74)
+    assert not accepted
+    assert len(review) == 1
+    assert "service_text_subject" in review[0].qa_flags
+
+
 def test_partition_rows_keeps_extended_qualification_work_slot() -> None:
     row = NormalizedRow(
         program="Лист1",
@@ -1483,3 +1633,73 @@ def test_normalize_record_moves_lesson_and_subject_fragments_out_of_teacher_fiel
     assert "\u043b\u0430\u0431" not in row.teacher.casefold()
     assert "\u0421\u0443\u0447\u0430\u0441\u043d\u0456 \u0431\u0430\u0437\u0438 \u0434\u0430\u043d\u0438\u0445" not in row.teacher
     assert "\u0421\u0443\u0447\u0430\u0441\u043d\u0456 \u0431\u0430\u0437\u0438 \u0434\u0430\u043d\u0438\u0445" in row.notes
+
+
+def test_sanitize_export_rows_demotes_tiny_iht_code_bucket() -> None:
+    row = NormalizedRow(
+        program="091 Біологія",
+        faculty="ННІ високих технологій",
+        week_type="Обидва",
+        day="Понеділок",
+        start_time="09:00",
+        end_time="10:20",
+        subject="Психологія спілкування",
+        confidence=0.98,
+        source_name="iht-schedule",
+        source_root_url="https://iht.knu.ua/rozklad",
+        asset_locator="https://iht.knu.ua/wp-content/uploads/iht.pdf",
+        sheet_name="pdf-table-p2-t1",
+        notes="091 Біологія / та біохімія",
+    )
+
+    accepted, review = sanitize_export_rows([row], [])
+
+    assert not accepted
+    assert len(review) == 1
+    assert "bad_program_label" in review[0].qa_flags
+
+
+def test_sanitize_export_rows_demotes_tiny_program_with_lesson_suffix() -> None:
+    row = NormalizedRow(
+        program="СФЕРІ ЕКОНОМІКИ (Л)",
+        faculty="Факультет соціології",
+        week_type="Обидва",
+        day="Вівторок",
+        start_time="11:00",
+        end_time="12:20",
+        subject="Економічна соціологія",
+        confidence=0.98,
+        source_name="sociology-schedule",
+        source_root_url="https://sociology.knu.ua/uk/students",
+        asset_locator="https://docs.google.com/spreadsheets/d/test/edit#gid=0",
+        sheet_name="English",
+    )
+
+    accepted, review = sanitize_export_rows([row], [])
+
+    assert not accepted
+    assert len(review) == 1
+    assert "bad_program_label" in review[0].qa_flags
+
+
+def test_sanitize_export_rows_demotes_tiny_lowercase_fragment_program() -> None:
+    row = NormalizedRow(
+        program="зондування Землі",
+        faculty="Географічний факультет",
+        week_type="Обидва",
+        day="Четвер",
+        start_time="12:20",
+        end_time="13:55",
+        subject="Основи топографії",
+        confidence=0.98,
+        source_name="geo-schedule",
+        source_root_url="https://geo.knu.ua/navchannya/rozklad-zanyat/",
+        asset_locator="https://geo.knu.ua/wp-content/uploads/2026/03/rozklad.pdf",
+        sheet_name="pdf-table-p4-t1",
+    )
+
+    accepted, review = sanitize_export_rows([row], [])
+
+    assert not accepted
+    assert len(review) == 1
+    assert "bad_program_label" in review[0].qa_flags

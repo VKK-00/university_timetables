@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from timetable_scraper.utils import (
     infer_asset_label_from_locator,
+    looks_like_bad_program_label,
+    looks_like_forbidden_subject_text,
     looks_like_garbage_text,
     looks_like_roomish_subject_text,
     looks_like_technical_label,
@@ -35,7 +37,7 @@ def test_looks_like_garbage_text_does_not_flag_english_subject_titles() -> None:
 
 def test_urlish_text_and_asset_label_detection() -> None:
     assert looks_like_urlish_text("https: / / drive.google.com / file / d / abc / view")
-    assert infer_asset_label_from_locator("https://iht.knu.ua/wp-content/uploads/2026/02/RozkladННІВТ-2-25-26.pdf") == "Rozklad ННІВТ 2 25 26"
+    assert infer_asset_label_from_locator("https://iht.knu.ua/wp-content/uploads/2026/02/RozkladННІВТ-2-25-26.pdf") == ""
 
 
 def test_technical_label_detection_rejects_storage_query_tails() -> None:
@@ -48,3 +50,17 @@ def test_roomish_subject_detection_supports_room_fragments() -> None:
     assert looks_like_roomish_subject_text("лаб.КЯФ 39")
     assert looks_like_roomish_subject_text("пр")
     assert looks_like_roomish_subject_text("113 ауд.")
+
+
+def test_forbidden_subject_detection_rejects_spaced_weekdays() -> None:
+    assert looks_like_forbidden_subject_text("M O N D A Y")
+    assert looks_like_forbidden_subject_text("F R I D A Y")
+
+
+def test_bad_program_label_detection_rejects_multiple_program_codes() -> None:
+    assert looks_like_bad_program_label("102 Хімія 091 Біологія та біохімія")
+
+
+def test_bad_program_label_detection_rejects_contaminated_schedule_titles() -> None:
+    assert looks_like_bad_program_label("Розклад занять на перший семестр 2025 2026 навчального року")
+    assert looks_like_bad_program_label("Соціальна робота 1 курс Магістр розклад з 26.01.2026 01.02.2026 року")

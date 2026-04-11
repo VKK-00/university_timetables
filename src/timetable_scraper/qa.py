@@ -10,6 +10,7 @@ from .models import NormalizedRow, WorkbookQaSheetSummary, WorkbookQaSummary
 from .utils import (
     coalesce_program_label,
     coalesce_label,
+    count_program_codes,
     contains_link_text,
     humanize_source_name,
     infer_asset_label_from_locator,
@@ -17,6 +18,7 @@ from .utils import (
     json_dumps,
     looks_like_admin_text,
     looks_like_bad_program_label,
+    normalize_program_candidate,
     looks_like_forbidden_subject_text,
     looks_like_technical_label,
     looks_like_garbage_text,
@@ -62,6 +64,9 @@ TINY_BAD_PROGRAM_PATTERNS = (
     re.compile(r"(?iu)^увага"),
     re.compile(r"(?iu)^початок\s+занять"),
     re.compile(r"(?iu)^навчання\s+з\s+використанням"),
+    re.compile(r"(?iu)^\d+\s*магістр\w*$"),
+    re.compile(r"(?iu)^\d+\s*курс\s*\([^)]{2,}\)$"),
+    re.compile(r"(?iu)^.+\s+\((?:л|пр|лаб|сем)\)$"),
 )
 
 
@@ -249,11 +254,9 @@ def _looks_like_fragment_subject(subject: str) -> bool:
 
 
 def _resolve_program_label(row: NormalizedRow) -> str:
-    course_label = _course_as_program_label(row.course)
     return coalesce_program_label(
         row.program,
         row.groups,
-        course_label,
         infer_asset_label_from_locator(row.asset_locator),
         row.sheet_name,
         _program_hint_from_notes(row.notes),
@@ -280,6 +283,8 @@ def _program_hint_from_notes(notes: str) -> str:
         return ""
     if contains_link_text(cleaned):
         return ""
+    if re.search(r"(?iu)\b(?:ауд|корп)\.?\b", cleaned):
+        return ""
     if looks_like_room_text(cleaned):
         return ""
     if looks_like_teacher_text(cleaned):
@@ -287,6 +292,16 @@ def _program_hint_from_notes(notes: str) -> str:
     if looks_like_service_text(cleaned):
         return ""
     if re.search(r"\d{2}\.\d{2}\.\d{4}", cleaned):
+        return ""
+    if re.search(r"(?u)\b\d{3}\s+\d{3}\s+\d{4}\b", cleaned):
+        return ""
+    if count_program_codes(cleaned) >= 2:
+        return ""
+    if re.search(r"(?iu)\b\d{3}\b", cleaned) and any(separator in cleaned for separator in ("/", ";")):
+        return ""
+    if any(stem in cleaned.casefold() for stem in ("січ", "лют", "берез", "квіт", "трав", "черв", "лип", "серп", "верес", "жовт", "листоп", "груд")) and "тиж" in cleaned.casefold():
+        return ""
+    if re.search(r"(?iu)\b(?:E\d|0\d{2}|1\d{2})\b.*[,;].*\b(?:E\d|0\d{2}|1\d{2})\b", cleaned):
         return ""
     if looks_like_bad_program_label(cleaned):
         return ""
@@ -296,10 +311,14 @@ def _program_hint_from_notes(notes: str) -> str:
 def _should_demote_tiny_program_bucket(rows: list[NormalizedRow]) -> bool:
     if len(rows) > 3 or not rows:
         return False
-    program = rows[0].program
+    program = normalize_program_candidate(rows[0].program)
+    if rows[0].source_name.casefold() == "iht-schedule" and count_program_codes(program) >= 1:
+        return True
     if looks_like_bad_program_label(program):
         return True
     if any(pattern.search(program) for pattern in TINY_BAD_PROGRAM_PATTERNS):
+        return True
+    if _looks_like_tiny_fragmented_program(program):
         return True
     if len(program) >= 70:
         return True
@@ -316,6 +335,42 @@ def _should_demote_tiny_program_bucket(rows: list[NormalizedRow]) -> bool:
         }
     )
     return program.casefold() in generic_labels
+
+
+def _looks_like_tiny_fragmented_program(program: str) -> bool:
+    cleaned = normalize_service_tokens(program)
+    if not cleaned:
+        return True
+    if cleaned[0].islower():
+        return True
+    if re.fullmatch(r"(?iu)\d{1,2}\s*курс", cleaned):
+        return True
+    if re.fullmatch(r"(?iu)\d+\s*магістр\w*$", cleaned):
+        return True
+    if re.fullmatch(r"(?iu)\d+\s*курс\s*\([^)]{2,}\)$", cleaned):
+        return True
+    if re.search(r"(?iu)\((?:л|пр|лаб|сем)\)$", cleaned):
+        return True
+    if cleaned.casefold().startswith(("rozklad ", "schedule of classes ")):
+        return True
+    conjunctions = {"та", "і", "й", "and"}
+    words = cleaned.casefold().split()
+    if words and (words[0] in conjunctions or words[-1] in conjunctions):
+        return True
+    if ";" not in cleaned:
+        return False
+    segments = [segment.strip(" .") for segment in cleaned.split(";") if segment.strip(" .")]
+    if len(segments) < 2:
+        return False
+    for segment in segments:
+        segment_words = segment.casefold().split()
+        if not segment_words:
+            continue
+        if segment_words[0] in conjunctions or segment_words[-1] in conjunctions:
+            return True
+    if not all(re.fullmatch(r"(?iu)(?:[A-ZА-ЯІЇЄҐ]{2,8}[a-zа-яіїєґ]?|\d{3}|E\d{1,3})", segment) for segment in segments):
+        return True
+    return False
 
 
 def _looks_like_wrapped_multiline_subject(subject: str) -> bool:
