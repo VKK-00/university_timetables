@@ -64,6 +64,7 @@ def test_normalize_record_normalizes_subject_derived_teacher_list() -> None:
 
     row = normalize_record(record, document=_make_document())
 
-    assert row.subject == "Науковий образ світу (л)"
+    assert row.subject == "Науковий образ світу"
+    assert row.lesson_type == "лекція"
     assert row.room == "ауд. 425"
     assert row.teacher == "проф. Григорук В.І.; Вербицький В.Г."

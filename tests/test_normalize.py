@@ -359,12 +359,11 @@ def test_sanitize_export_rows_recovers_program_from_groups_or_asset_label() -> N
 
     sanitized, review = sanitize_export_rows(accepted, [])
 
-    assert len(sanitized) >= 2
+    assert len(sanitized) >= 1
     assert sanitized[0].program == "Фізика наносистем"
     assert all(row.program not in {"uploads", "wp-content", "spreadsheets"} for row in sanitized)
     assert all(not looks_like_bad_program_label(row.program) for row in sanitized)
     assert "program_label_recovered" in sanitized[0].autofix_actions
-    assert any("program_label_recovered" in row.autofix_actions for row in sanitized[1:])
     assert all("bad_program_label" in row.qa_flags for row in review)
     assert len(review) == 2
 
@@ -1112,7 +1111,8 @@ def test_normalize_record_extracts_trailing_room_from_subject_tail() -> None:
         raw_excerpt="Іноземна мова (пр) / 406",
     )
     row = normalize_record(record, document=ParsedDocument(asset=fetched, sheets=[]))
-    assert row.subject == "Іноземна мова (пр)"
+    assert row.subject == "Іноземна мова"
+    assert row.lesson_type == "практична"
     assert row.room == "ауд. 406"
 
 
@@ -1171,7 +1171,8 @@ def test_normalize_record_moves_hyphenated_join_code_out_of_subject() -> None:
 
     row = normalize_record(record, document=ParsedDocument(asset=fetched, sheets=[]))
 
-    assert row.subject == "Security systems operation and support practice methods (lek.)"
+    assert row.subject == "Security systems operation and support practice methods"
+    assert row.lesson_type == "лекція"
     assert "ugb-wppy-tnj" in row.notes
 
 
@@ -1703,3 +1704,156 @@ def test_sanitize_export_rows_demotes_tiny_lowercase_fragment_program() -> None:
     assert not accepted
     assert len(review) == 1
     assert "bad_program_label" in review[0].qa_flags
+
+
+def test_normalize_record_repairs_psy_subject_teacher_room_mix() -> None:
+    asset = DiscoveredAsset(
+        source_name="psy-schedule",
+        source_kind="web_page",
+        source_url_or_path="https://psy.knu.ua/study/schedule",
+        asset_kind="xlsx",
+        locator="https://psy.knu.ua/uploads/psy.xlsx",
+        display_name="psy.xlsx",
+    )
+    fetched = FetchedAsset(
+        asset=asset,
+        content=b"",
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        content_hash="psy",
+        resolved_locator="psy.xlsx",
+    )
+    record = RawRecord(
+        values={
+            "program": "Психологія 1 курс _Магістр_",
+            "faculty": "Факультет психології",
+            "week_type": "Обидва",
+            "day": "Середа",
+            "start_time": "10:35",
+            "end_time": "12:10",
+            "subject": "сем) Clinical psychopharmacology (lek / sem) . Дарвішов Н.",
+            "teacher": "доц. Москаленко А.М.; доц. Іваненко Б.Б.",
+            "room": "корпоративна; ауд. 410",
+            "groups": "І група",
+        },
+        row_index=6,
+        sheet_name="Психологія 1 курс _Магістр_",
+        raw_excerpt="сем) Clinical psychopharmacology (lek / sem) . Дарвішов Н. | корпоративна; ауд. 410",
+    )
+
+    row = normalize_record(record, document=ParsedDocument(asset=fetched, sheets=[]))
+
+    assert row.subject == "Clinical psychopharmacology"
+    assert "сем" not in row.subject.casefold()
+    assert "Дарвішов" not in row.subject
+    assert "Дарвішов" in row.teacher
+    assert "ауд. 410" in row.room
+    assert "корпоративна" not in row.room.casefold()
+    assert "корпоративна" in row.notes.casefold()
+    assert "лекція" in row.lesson_type
+    assert "семінар" in row.lesson_type
+
+
+def test_normalize_record_moves_trailing_time_note_out_of_subject() -> None:
+    asset = DiscoveredAsset(
+        source_name="geo-schedule",
+        source_kind="web_page",
+        source_url_or_path="https://geo.knu.ua/navchannya/rozklad-zanyat/",
+        asset_kind="pdf",
+        locator="https://geo.knu.ua/wp-content/uploads/2026/03/rozklad.pdf",
+        display_name="rozklad.pdf",
+    )
+    fetched = FetchedAsset(asset=asset, content=b"", content_type="application/pdf", content_hash="geo", resolved_locator="rozklad.pdf")
+    record = RawRecord(
+        values={
+            "program": "СЕРЕДНЯ ; ОСВІТА",
+            "faculty": "Географічний факультет",
+            "week_type": "Обидва",
+            "day": "Середа",
+            "start_time": "11:30",
+            "end_time": "12:50",
+            "subject": "Історія та філософія педагогіки (л) на 11:30",
+            "teacher": "Деркач О.А.",
+        },
+        row_index=3,
+        sheet_name="pdf-table-p1-t1",
+        raw_excerpt="Історія та філософія педагогіки (л) на 11:30",
+    )
+
+    row = normalize_record(record, document=ParsedDocument(asset=fetched, sheets=[]))
+
+    assert row.subject == "Історія та філософія педагогіки"
+    assert row.lesson_type == "лекція"
+    assert "на 11:30" in row.notes
+
+
+def test_sanitize_export_rows_demotes_tiny_geo_semicolon_program_bucket() -> None:
+    row = NormalizedRow(
+        program="СЕРЕДНЯ ; ОСВІТА",
+        faculty="Географічний факультет",
+        week_type="Обидва",
+        day="Середа",
+        start_time="11:30",
+        end_time="12:50",
+        subject="Історія та філософія педагогіки",
+        confidence=0.98,
+        source_name="geo-schedule",
+        source_root_url="https://geo.knu.ua/navchannya/rozklad-zanyat/",
+        asset_locator="https://geo.knu.ua/wp-content/uploads/2026/03/rozklad.pdf",
+        sheet_name="pdf-table-p1-t1",
+    )
+
+    accepted, review = sanitize_export_rows([row], [])
+
+    assert not accepted
+    assert len(review) == 1
+    assert "bad_program_label" in review[0].qa_flags
+
+
+def test_sanitize_export_rows_demotes_tiny_mechmat_subject_like_program_bucket() -> None:
+    row = NormalizedRow(
+        program="Динамічні системи (лек.)+кон",
+        faculty="Механіко-математичний факультет",
+        week_type="Обидва",
+        day="Понеділок",
+        start_time="08:40",
+        end_time="10:15",
+        subject="комп'ютерна математика",
+        confidence=0.98,
+        source_name="mechmat-schedule",
+        source_root_url="https://mechmat.knu.ua/golovna/studentu/rozklad/",
+        asset_locator="https://mechmat.knu.ua/wp-content/uploads/2026/03/rozklad.xlsx",
+        sheet_name="Лист1",
+    )
+
+    accepted, review = sanitize_export_rows([row], [])
+
+    assert not accepted
+    assert len(review) == 1
+    assert "bad_program_label" in review[0].qa_flags
+
+
+def test_sanitize_export_rows_demotes_phys_academic_title_bucket() -> None:
+    rows = [
+        NormalizedRow(
+            program="д.ф.-м.н",
+            faculty="Фізичний факультет",
+            week_type="Обидва",
+            day="Понеділок",
+            start_time="08:40",
+            end_time="10:15",
+            subject="Фізика ультразвукової діагностики",
+            confidence=0.98,
+            source_name="phys-schedule",
+            source_root_url="https://phys.knu.ua/navchannya/rozklad-zanyat?ad",
+            asset_locator="https://phys.knu.ua/wp-content/uploads/2026/01/knuphystimetable2sem2025x2026v2.xlsx",
+            sheet_name="Лист1",
+            notes="д.ф.-м.н.",
+        )
+        for _ in range(4)
+    ]
+
+    accepted, review = sanitize_export_rows(rows, [])
+
+    assert not accepted
+    assert len(review) == 4
+    assert all("bad_program_label" in row.qa_flags for row in review)

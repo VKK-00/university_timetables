@@ -5,6 +5,7 @@ from timetable_scraper.utils import (
     looks_like_bad_program_label,
     looks_like_forbidden_subject_text,
     looks_like_garbage_text,
+    looks_like_room_text,
     looks_like_roomish_subject_text,
     looks_like_technical_label,
     looks_like_urlish_text,
@@ -50,6 +51,12 @@ def test_roomish_subject_detection_supports_room_fragments() -> None:
     assert looks_like_roomish_subject_text("лаб.КЯФ 39")
     assert looks_like_roomish_subject_text("пр")
     assert looks_like_roomish_subject_text("113 ауд.")
+
+
+def test_room_detection_does_not_treat_corporate_as_room() -> None:
+    assert not looks_like_room_text("корпоративна")
+    assert looks_like_room_text("ауд. 410")
+    assert looks_like_room_text("корп. 2")
 
 
 def test_forbidden_subject_detection_rejects_spaced_weekdays() -> None:

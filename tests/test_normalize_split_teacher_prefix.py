@@ -26,12 +26,12 @@ def test_normalize_record_repairs_split_teacher_prefix_between_subject_and_teach
     record = RawRecord(
         values={
             "program": "F7",
-            "faculty": "\u0420\u0430\u0434\u0456\u043e\u0444\u0456\u0437\u0438\u0447\u043d\u0438\u0439 \u0444\u0430\u043a\u0443\u043b\u044c\u0442\u0435\u0442",
-            "day": "\u0421\u0435\u0440\u0435\u0434\u0430",
+            "faculty": "Радіофізичний факультет",
+            "day": "Середа",
             "start_time": "08:40",
             "end_time": "10:15",
-            "subject": "\u041c\u0430\u0440\u2019 / \u0411\u0435\u0437\u043f\u0435\u043a\u0430 / \u043a\u043e\u043c\u043f\u2019\u044e\u0442\u0435\u0440\u043d\u0438\u0445 / \u043c\u0435\u0440\u0435\u0436 \u0442\u0430 / \u0441\u0438\u0441\u0442\u0435\u043c (\u043b\u0435\u043a.)",
-            "teacher": "\u044f\u043d\u043e\u0432\u0441\u044c\u043a\u0438\u0439 \u0412.\u0410.",
+            "subject": "Мар’ / Безпека / комп’ютерних / мереж та / систем (лек.)",
+            "teacher": "яновський В.А.",
         },
         row_index=3,
         sheet_name="pdf-table-p2-t1",
@@ -40,8 +40,9 @@ def test_normalize_record_repairs_split_teacher_prefix_between_subject_and_teach
 
     row = normalize_record(record, document=_make_document())
 
-    assert row.subject == "\u0411\u0435\u0437\u043f\u0435\u043a\u0430 \u043a\u043e\u043c\u043f\u2019\u044e\u0442\u0435\u0440\u043d\u0438\u0445 \u043c\u0435\u0440\u0435\u0436 \u0442\u0430 \u0441\u0438\u0441\u0442\u0435\u043c (\u043b\u0435\u043a.)"
-    assert row.teacher == "\u041c\u0430\u0440\u2019\u044f\u043d\u043e\u0432\u0441\u044c\u043a\u0438\u0439 \u0412.\u0410."
+    assert row.subject == "Безпека комп’ютерних мереж та систем"
+    assert row.lesson_type == "лекція"
+    assert row.teacher == "Мар’яновський В.А."
     assert "subject_cleaned" in row.autofix_actions
 
 
@@ -49,11 +50,11 @@ def test_normalize_record_moves_curly_apostrophe_teacher_out_of_subject() -> Non
     record = RawRecord(
         values={
             "program": "F7",
-            "faculty": "\u0420\u0430\u0434\u0456\u043e\u0444\u0456\u0437\u0438\u0447\u043d\u0438\u0439 \u0444\u0430\u043a\u0443\u043b\u044c\u0442\u0435\u0442",
-            "day": "\u0421\u0435\u0440\u0435\u0434\u0430",
+            "faculty": "Радіофізичний факультет",
+            "day": "Середа",
             "start_time": "08:40",
             "end_time": "10:15",
-            "subject": "\u041c\u0430\u0440\u2019\u044f\u043d\u043e\u0432\u0441\u044c\u043a\u0438\u0439 \u0412.\u0410. / \u0411\u0435\u0437\u043f\u0435\u043a\u0430 / \u043a\u043e\u043c\u043f\u2019\u044e\u0442\u0435\u0440\u043d\u0438\u0445 / \u043c\u0435\u0440\u0435\u0436 \u0442\u0430 / \u0441\u0438\u0441\u0442\u0435\u043c (\u043b\u0435\u043a.)",
+            "subject": "Мар’яновський В.А. / Безпека / комп’ютерних / мереж та / систем (лек.)",
         },
         row_index=4,
         sheet_name="pdf-table-p2-t1",
@@ -62,6 +63,7 @@ def test_normalize_record_moves_curly_apostrophe_teacher_out_of_subject() -> Non
 
     row = normalize_record(record, document=_make_document())
 
-    assert row.subject == "\u0411\u0435\u0437\u043f\u0435\u043a\u0430 \u043a\u043e\u043c\u043f\u2019\u044e\u0442\u0435\u0440\u043d\u0438\u0445 \u043c\u0435\u0440\u0435\u0436 \u0442\u0430 \u0441\u0438\u0441\u0442\u0435\u043c (\u043b\u0435\u043a.)"
-    assert row.teacher == "\u041c\u0430\u0440\u2019\u044f\u043d\u043e\u0432\u0441\u044c\u043a\u0438\u0439 \u0412.\u0410."
+    assert row.subject == "Безпека комп’ютерних мереж та систем"
+    assert row.lesson_type == "лекція"
+    assert row.teacher == "Мар’яновський В.А."
     assert "teacher_from_subject" in row.autofix_actions

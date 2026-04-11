@@ -61,7 +61,7 @@ LATIN_TEACHER_LABEL_RE = re.compile(
 COMPACT_TEACHER_LABEL_RE = re.compile(r"(?u)^[А-ЯІЇЄҐ][а-яіїєґ'’ʼ-]+\s+[А-ЯІЇЄҐ]\.\s*[А-ЯІЇЄҐ]\.?$")
 LINK_TEXT_RE = re.compile(r"(?iu)(https?://\S+|(?:zoom|teams|meet)(?:[\w./:@?=#&%-]+)?)")
 ROOM_TEXT_RE = re.compile(
-    r"(?iu)\b(?:ауд\.?\s*[\w./-]+|аудитор(?:ія|iя)\s*[\w./-]+|каб\.?\s*[\w./-]+|корп(?:ус|\.)?\s*[\w./-]+|online|онлайн)\b"
+    r"(?iu)\b(?:ауд\.?\s*[\w./-]+|аудитор(?:ія|iя)\s*[\w./-]+|каб\.?\s*[\w./-]+|корпус\s*[\dA-Za-zА-ЯІЇЄҐ./-]+|корп\.\s*[\dA-Za-zА-ЯІЇЄҐ./-]+|корп\s+\d[\dA-Za-zА-ЯІЇЄҐ./-]*|online|онлайн)\b"
 )
 TEACHER_TEXT_RE = re.compile(
     r"(?iu)(?:\b(?:проф|доц|ас|викл|ст\.?\s*викл|phd|к\.\s*[юф]\.\s*н|д\.\s*[юф]\.\s*н)\.?\b|[А-ЯІЇЄҐ][а-яіїєґ'’ʼ-]+\s*[А-ЯІЇЄҐ]\.\s*[А-ЯІЇЄҐ]\.)"
@@ -127,6 +127,7 @@ BAD_PROGRAM_LABEL_PATTERNS = (
     re.compile(r"(?iu)^розклад\b.*$"),
     re.compile(r"(?iu)^rozklad\b.*$"),
     re.compile(r"(?iu)^schedule(?:\s+of\s+classes)?$"),
+    re.compile(r"(?iu)^timetable\b.*$"),
     re.compile(r"(?iu)^uploads$"),
     re.compile(r"(?iu)^upload$"),
     re.compile(r"(?iu)^wp[-_\s]*content$"),
@@ -140,6 +141,8 @@ BAD_PROGRAM_LABEL_PATTERNS = (
     re.compile(r"(?iu)^(?:[ivx]+|\d+)\s+група$"),
     re.compile(r"(?iu)^[12]\s*підгр\.?$"),
     re.compile(r"(?iu)^\d+\s*курс$"),
+    re.compile(r"(?iu)^\d{4}\s+\d{4}\s+\d+\s*sem\b.*$"),
+    re.compile(r"(?iu)^\d+\s*sem\.\b.*$"),
     re.compile(r"(?iu)^(?:\d+\s+){1,3}[A-Za-z0-9+/=_-]{6,}$"),
     re.compile(r"(?iu)^начитка!?$"),
     re.compile(r"(?iu)^постійний(?:\s+розклад)?!?$"),
@@ -786,7 +789,12 @@ def looks_like_room_text(value: Any) -> bool:
         return False
     if re.search(r"(?iu)\b(?:\u0430\u0443\u0434\.?\s*[\w./-]+|\u0430\u0443\u0434\u0438\u0442\u043e\u0440(?:\u0456\u044f|i\u044f)\s*[\w./-]+|\u043a\u0430\u0431\.?\s*[\w./-]+|online|\u043e\u043d\u043b\u0430\u0439\u043d)\b", text):
         return True
-    return bool(re.search(r"(?iu)\b\u043a\u043e\u0440\u043f(?:\u0443\u0441|\.)\s*[\w./-]+", text))
+    return bool(
+        re.search(
+            r"(?iu)\b(?:\u043a\u043e\u0440\u043f\u0443\u0441\s*[\dA-Za-z\u0410-\u042f\u0406\u0407\u0404\u0490./-]+|\u043a\u043e\u0440\u043f\.\s*[\dA-Za-z\u0410-\u042f\u0406\u0407\u0404\u0490./-]+|\u043a\u043e\u0440\u043f\s+\d[\dA-Za-z\u0410-\u042f\u0406\u0407\u0404\u0490./-]*)",
+            text,
+        )
+    )
 
 
 def looks_like_teacher_text(value: Any) -> bool:

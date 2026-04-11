@@ -309,10 +309,18 @@ def _program_hint_from_notes(notes: str) -> str:
 
 
 def _should_demote_tiny_program_bucket(rows: list[NormalizedRow]) -> bool:
-    if len(rows) > 3 or not rows:
+    if not rows:
         return False
     program = normalize_program_candidate(rows[0].program)
-    if rows[0].source_name.casefold() == "iht-schedule" and count_program_codes(program) >= 1:
+    source_name = rows[0].source_name.casefold()
+    if source_name == "phys-schedule":
+        if re.fullmatch(r"(?iu)(?:акад|чл\.-?кор|с\.н\.с|[дк]\.[а-яіїєґ]\.-?[а-яіїєґ]\.[а-яіїєґ]\.?)", program):
+            return True
+        if re.search(r"(?iu)\b(?:timetable|sem\.)\b", program) or re.search(r"\b20\d{2}\b", program):
+            return True
+    if len(rows) > 3:
+        return False
+    if source_name == "iht-schedule" and count_program_codes(program) >= 1:
         return True
     if looks_like_bad_program_label(program):
         return True
@@ -320,6 +328,15 @@ def _should_demote_tiny_program_bucket(rows: list[NormalizedRow]) -> bool:
         return True
     if _looks_like_tiny_fragmented_program(program):
         return True
+    if source_name == "phys-schedule" and len(rows) <= 5:
+        safe_markers = ("груп", "курс", "бакалавр", "магістр", "фізик", "оптик", "астроном", "мат-во", "матем", "івт", "наносистем")
+        if looks_like_teacher_text(program):
+            return True
+        if not any(token in program.casefold() for token in safe_markers):
+            return True
+    if source_name == "mechmat-schedule" and len(rows) <= 1:
+        if "+" in program or LESSON_TEXT_RE.search(program):
+            return True
     if len(program) >= 70:
         return True
     generic_labels = {
@@ -341,6 +358,10 @@ def _looks_like_tiny_fragmented_program(program: str) -> bool:
     cleaned = normalize_service_tokens(program)
     if not cleaned:
         return True
+    if looks_like_teacher_text(cleaned):
+        return True
+    if re.fullmatch(r"(?iu)(?:dr|prof|associate|assistant)\.?\s+[A-ZА-ЯІЇЄҐ][A-Za-zА-ЯІЇЄҐа-яіїєґ'’ʼ.-]+(?:\s+[A-ZА-ЯІЇЄҐ][A-Za-zА-ЯІЇЄҐа-яіїєґ'’ʼ.-]+){0,3}", cleaned):
+        return True
     if cleaned[0].islower():
         return True
     if re.fullmatch(r"(?iu)\d{1,2}\s*курс", cleaned):
@@ -357,18 +378,9 @@ def _looks_like_tiny_fragmented_program(program: str) -> bool:
     words = cleaned.casefold().split()
     if words and (words[0] in conjunctions or words[-1] in conjunctions):
         return True
-    if ";" not in cleaned:
-        return False
-    segments = [segment.strip(" .") for segment in cleaned.split(";") if segment.strip(" .")]
-    if len(segments) < 2:
-        return False
-    for segment in segments:
-        segment_words = segment.casefold().split()
-        if not segment_words:
-            continue
-        if segment_words[0] in conjunctions or segment_words[-1] in conjunctions:
-            return True
-    if not all(re.fullmatch(r"(?iu)(?:[A-ZА-ЯІЇЄҐ]{2,8}[a-zа-яіїєґ]?|\d{3}|E\d{1,3})", segment) for segment in segments):
+    if ";" in cleaned:
+        return True
+    if "+" in cleaned and LESSON_TEXT_RE.search(cleaned):
         return True
     return False
 

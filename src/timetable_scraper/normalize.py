@@ -177,24 +177,42 @@ LESSON_TYPE_MARKER_VALUES = {
     "лек": "лекція",
     "лек.": "лекція",
     "лекція": "лекція",
+    "lek": "лекція",
+    "lek.": "лекція",
+    "lecture": "лекція",
     "пр": "практична",
     "пр.": "практична",
     "практ": "практична",
     "практ.": "практична",
     "практична": "практична",
+    "prac": "практична",
+    "prac.": "практична",
+    "practical": "практична",
     "лаб": "лабораторна",
     "лаб.": "лабораторна",
     "лабораторна": "лабораторна",
+    "lab": "лабораторна",
+    "lab.": "лабораторна",
     "сем": "семінар",
     "сем.": "семінар",
     "семінар": "семінар",
+    "sem": "семінар",
+    "sem.": "семінар",
+    "seminar": "семінар",
 }
 PURE_LESSON_TYPE_SUBJECT_RE = re.compile(
-    r"(?iu)^\(?\s*(?P<marker>л|л\.|лек|лек\.|лекція|пр|пр\.|практ|практ\.|практична|лаб|лаб\.|лабораторна|сем|сем\.|семінар)\s*\)?$"
+    r"(?iu)^\(?\s*(?P<marker>л|л\.|лек|лек\.|лекція|lek|lek\.|lecture|пр|пр\.|практ|практ\.|практична|prac|prac\.|practical|лаб|лаб\.|лабораторна|lab|lab\.|сем|сем\.|семінар|sem|sem\.|seminar)\s*\)?$"
 )
 TRAILING_SUBJECT_MARKER_RE = re.compile(
     r"(?iu)(?P<prefix>.+?)\s*(?:[\[(]?\s*(?P<marker>іспит|екзамен|залік|захист|дист\.?|дистанц\.?|дистанційно)\s*[\])]?\.?)$"
 )
+LEADING_SUBJECT_MARKER_RE = re.compile(
+    r"(?iu)^(?:[\[(]?\s*)?(?P<marker>л|л\.|лек|лек\.|лекція|lek|lek\.|lecture|пр|пр\.|практ|практ\.|практична|prac|prac\.|practical|лаб|лаб\.|лабораторна|lab|lab\.|сем|сем\.|семінар|sem|sem\.|seminar)\s*[\])\].,:-]+\s*(?P<rest>.+)$"
+)
+TRAILING_TEACHER_FRAGMENT_RE = re.compile(
+    r"(?iu)^(?P<subject>.+?)\s*[.;,]\s*(?P<teacher>(?:(?:проф|доц|ас|асист|викл|dr|prof)\.?\s+)?[А-ЯІЇЄҐA-Z][А-ЯІЇЄҐA-Zа-яіїєґa-z'’ʼ-]+(?:\s+[А-ЯІЇЄҐA-Z]\.){1,2})$"
+)
+SUBJECT_TRAILING_TIME_NOTE_RE = re.compile(r"(?iu)^(?P<subject>.+?)\s+(?P<note>на\s+\d{1,2}[:.]\d{2})$")
 GROUP_NOISE_MARKERS = {
     "розклад",
     "занятьстудентів",
@@ -810,7 +828,7 @@ def _cleanup_structured_fields(values: dict[str, str]) -> dict[str, str]:
         "day": values["day"],
         "subject": subject_text,
         "teacher": _merge_unique([teacher_text, *subject_teachers, *room_teachers]),
-        "lesson_type": normalize_service_tokens(values["lesson_type"]),
+        "lesson_type": _normalize_lesson_type_field(values["lesson_type"]),
         "link": link_text,
         "room": _merge_unique([room_text, *subject_rooms, *teacher_rooms]),
         "groups": _cleanup_groups_field(values["groups"]),
@@ -878,7 +896,7 @@ def _cleanup_aux_field(text: str, *, keep: str) -> tuple[str, list[str], list[st
             primary_parts.append(teacher_segment)
             index += consumed
             continue
-        if _looks_like_room_segment(segment) or looks_like_roomish_subject_text(segment):
+        if _looks_like_room_segment(segment) or looks_like_roomish_subject_text(segment) or looks_like_room_text(segment):
             room_parts.append(_normalize_roomish_segment(segment))
             index += 1
             continue
@@ -1075,8 +1093,10 @@ def _looks_like_explicit_group_value(value: str) -> bool:
 def _postprocess_structured_fields(cleaned_fields: dict[str, str]) -> dict[str, str]:
     updated = dict(cleaned_fields)
     updated["subject"], updated["teacher"] = _repair_split_teacher_prefix(updated["subject"], updated["teacher"])
-    updated["teacher"] = _normalize_teacher_field(updated["teacher"])
     updated["groups"] = _cleanup_groups_field(updated["groups"])
+    updated["subject"], leading_lesson = _peel_leading_lesson_marker(updated["subject"])
+    if leading_lesson:
+        updated["lesson_type"] = _merge_unique([updated["lesson_type"], leading_lesson])
     updated["subject"], leading_teacher = _extract_leading_teacher_from_subject(updated["subject"])
     if leading_teacher:
         updated["teacher"] = _merge_unique([updated["teacher"], leading_teacher])
@@ -1085,6 +1105,9 @@ def _postprocess_structured_fields(cleaned_fields: dict[str, str]) -> dict[str, 
         updated["room"] = _merge_unique([updated["room"], trailing_room])
     if trailing_notes:
         updated["notes"] = _merge_unique([updated["notes"], *trailing_notes])
+    updated["subject"], trailing_teacher = _peel_trailing_teacher_from_subject(updated["subject"])
+    if trailing_teacher:
+        updated["teacher"] = _merge_unique([updated["teacher"], trailing_teacher])
     updated["subject"], trailing_program_notes = _peel_subject_program_metadata(updated["subject"])
     if trailing_program_notes:
         updated["notes"] = _merge_unique([updated["notes"], *trailing_program_notes])
@@ -1099,6 +1122,11 @@ def _postprocess_structured_fields(cleaned_fields: dict[str, str]) -> dict[str, 
             updated["room"] = _merge_unique([updated["room"], room_fragment])
         if lesson_fragment and not updated["lesson_type"]:
             updated["lesson_type"] = lesson_fragment
+    updated["room"], room_notes = _cleanup_room_field(updated["room"])
+    if room_notes:
+        updated["notes"] = _merge_unique([updated["notes"], *room_notes])
+    updated["teacher"] = _normalize_teacher_field(updated["teacher"])
+    updated["lesson_type"] = _normalize_lesson_type_field(updated["lesson_type"])
     if updated["subject"] and looks_like_admin_text(updated["subject"]):
         updated["notes"] = _merge_unique([updated["notes"], updated["subject"]])
         updated["subject"] = ""
@@ -1136,39 +1164,55 @@ def _normalize_subject_markers(cleaned_fields: dict[str, str]) -> dict[str, str]
         updated["subject"] = ""
         return updated
 
-    def classify_marker(raw_marker: str) -> tuple[str, str] | None:
-        marker = normalize_service_tokens(raw_marker).strip(" .,:;").casefold()
-        if marker in SESSION_MARKER_VALUES:
-            return ("note", SESSION_MARKER_VALUES[marker])
-        if marker in DISTANCE_MARKER_VALUES:
-            return ("note", DISTANCE_MARKER_VALUES[marker])
-        return None
+    def classify_markers(raw_marker: str) -> list[tuple[str, str]]:
+        marker_text = normalize_service_tokens(raw_marker).strip(" .,:;")
+        if not marker_text:
+            return []
+        raw_parts = [
+            normalize_service_tokens(part).strip(" .,:;")
+            for part in re.split(r"(?iu)\s*(?:/|,|;|\+|&)\s*", marker_text)
+            if normalize_service_tokens(part).strip(" .,:;")
+        ]
+        if not raw_parts:
+            raw_parts = [marker_text]
+        classifications: list[tuple[str, str]] = []
+        for raw_part in raw_parts:
+            marker = raw_part.casefold()
+            if marker in SESSION_MARKER_VALUES:
+                classifications.append(("note", SESSION_MARKER_VALUES[marker]))
+                continue
+            if marker in DISTANCE_MARKER_VALUES:
+                classifications.append(("note", DISTANCE_MARKER_VALUES[marker]))
+                continue
+            if marker in LESSON_TYPE_MARKER_VALUES:
+                classifications.append(("lesson", LESSON_TYPE_MARKER_VALUES[marker]))
+        return classifications
 
     while True:
         match = SUBJECT_MARKER_PAREN_RE.search(subject)
         if not match:
             break
-        classification = classify_marker(match.group("marker"))
-        if not classification:
+        classifications = classify_markers(match.group("marker"))
+        if not classifications:
             break
-        kind, canonical = classification
-        if kind == "lesson":
-            lesson_markers.append(canonical)
-        else:
-            note_markers.append(canonical)
+        for kind, canonical in classifications:
+            if kind == "lesson":
+                lesson_markers.append(canonical)
+            else:
+                note_markers.append(canonical)
         subject = normalize_service_tokens(f"{subject[:match.start()]} {subject[match.end():]}")
 
     trailing_match = TRAILING_SUBJECT_MARKER_RE.fullmatch(subject)
     if trailing_match:
-        classification = classify_marker(trailing_match.group("marker"))
-        if classification:
+        classifications = classify_markers(trailing_match.group("marker"))
+        if classifications:
             prefix = normalize_service_tokens(trailing_match.group("prefix")).strip(" ,;/-")
             if prefix and any(character.isalpha() for character in prefix):
-                kind, canonical = classification
-                if kind == "lesson":
-                    lesson_markers.append(canonical)
-                else:
-                    note_markers.append(canonical)
+                for kind, canonical in classifications:
+                    if kind == "lesson":
+                        lesson_markers.append(canonical)
+                    else:
+                        note_markers.append(canonical)
                 subject = prefix
 
     subject = normalize_service_tokens(subject).strip(" ,;/-")
@@ -1181,6 +1225,25 @@ def _normalize_subject_markers(cleaned_fields: dict[str, str]) -> dict[str, str]
         return updated
     updated["subject"] = subject
     return updated
+
+
+def _normalize_lesson_type_field(text: str) -> str:
+    cleaned = normalize_service_tokens(text)
+    if not cleaned:
+        return ""
+    normalized_parts: list[str] = []
+    for segment in _split_segments(cleaned):
+        candidate = normalize_service_tokens(segment).strip(" .,:;")
+        if not candidate:
+            continue
+        canonical = LESSON_TYPE_MARKER_VALUES.get(candidate.casefold(), "")
+        if not canonical:
+            for pattern, mapped in LESSON_TYPE_PATTERNS:
+                if pattern.search(candidate):
+                    canonical = mapped
+                    break
+        normalized_parts.append(canonical or candidate)
+    return _merge_unique(normalized_parts)
 
 
 def _repair_split_teacher_prefix(subject: str, teacher: str) -> tuple[str, str]:
@@ -1300,6 +1363,21 @@ def _extract_trailing_room_from_subject(subject: str) -> tuple[str, str]:
     return subject_part, room_part
 
 
+def _peel_leading_lesson_marker(subject: str) -> tuple[str, str]:
+    cleaned = normalize_service_tokens(subject)
+    if not cleaned:
+        return "", ""
+    match = LEADING_SUBJECT_MARKER_RE.fullmatch(cleaned)
+    if not match:
+        return cleaned, ""
+    marker = normalize_service_tokens(match.group("marker")).strip(" .,:;").casefold()
+    canonical = LESSON_TYPE_MARKER_VALUES.get(marker, "")
+    remainder = normalize_service_tokens(match.group("rest")).strip(" ,;/-")
+    if not canonical or not remainder:
+        return cleaned, ""
+    return remainder, canonical
+
+
 def _looks_like_code_segment(value: str) -> bool:
     cleaned = normalize_service_tokens(value)
     if not cleaned:
@@ -1335,6 +1413,12 @@ def _peel_subject_tail_metadata(subject: str) -> tuple[str, str, list[str]]:
         break
     subject_part = _merge_unique(segments, separator=" / ")
     subject_part, trailing_room = _extract_trailing_room_from_subject(subject_part)
+    time_note_match = SUBJECT_TRAILING_TIME_NOTE_RE.fullmatch(subject_part)
+    if time_note_match:
+        subject_part = normalize_service_tokens(time_note_match.group("subject")).strip(" /,;")
+        time_note = normalize_service_tokens(time_note_match.group("note"))
+        if time_note:
+            note_parts.append(time_note)
     room_value = _merge_unique([room_part, trailing_room])
     return subject_part, room_value, note_parts
 
@@ -1391,6 +1475,45 @@ def _extract_leading_teacher_from_subject(subject: str) -> tuple[str, str]:
     if not remainder or looks_like_room_text(remainder) or contains_link_text(remainder):
         return cleaned, ""
     return remainder, first
+
+
+def _peel_trailing_teacher_from_subject(subject: str) -> tuple[str, str]:
+    cleaned = normalize_service_tokens(subject)
+    if not cleaned:
+        return "", ""
+    match = TRAILING_TEACHER_FRAGMENT_RE.fullmatch(cleaned)
+    if not match:
+        return cleaned, ""
+    subject_part = normalize_service_tokens(match.group("subject")).strip(" ,;/-")
+    teacher_part = normalize_service_tokens(match.group("teacher")).strip(" ,;/-")
+    if not subject_part or not teacher_part:
+        return cleaned, ""
+    return subject_part, teacher_part
+
+
+def _cleanup_room_field(text: str) -> tuple[str, list[str]]:
+    cleaned = normalize_service_tokens(text)
+    if not cleaned:
+        return "", []
+    room_parts: list[str] = []
+    note_parts: list[str] = []
+    for segment in _split_segments(cleaned):
+        normalized = normalize_service_tokens(segment)
+        if not normalized:
+            continue
+        if _looks_like_room_segment(normalized) or looks_like_roomish_subject_text(normalized) or looks_like_room_text(normalized):
+            room_parts.append(_normalize_roomish_segment(normalized))
+            continue
+        residual, teachers, rooms, links = _extract_entities(normalized)
+        room_parts.extend(rooms)
+        note_parts.extend(teachers)
+        note_parts.extend(links)
+        if residual:
+            if _looks_like_room_segment(residual) or looks_like_roomish_subject_text(residual) or looks_like_room_text(residual):
+                room_parts.append(_normalize_roomish_segment(residual))
+            else:
+                note_parts.append(residual)
+    return _merge_unique(room_parts), _unique_list(note_parts)
 
 
 def _looks_like_subject_noise_segment(value: str) -> bool:

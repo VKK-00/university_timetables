@@ -40,7 +40,8 @@ def test_normalize_record_moves_leading_teacher_out_of_rex_subject() -> None:
     row = normalize_record(record, document=_make_document())
 
     assert row.teacher == "Лень Ю.А"
-    assert row.subject == "Мікро- та наноелектроніка (лек.) інд. граф."
+    assert row.subject == "Мікро- та наноелектроніка інд. граф."
+    assert row.lesson_type == "лекція"
     assert "teacher_from_subject" in row.autofix_actions
     assert "subject_cleaned" in row.autofix_actions
 
@@ -63,4 +64,5 @@ def test_normalize_record_keeps_non_teacher_wrapped_subject_intact() -> None:
     row = normalize_record(record, document=_make_document())
 
     assert row.teacher == ""
-    assert row.subject == "Мікро- та наноелектроніка (лек.) інд. граф."
+    assert row.subject == "Мікро- та наноелектроніка інд. граф."
+    assert row.lesson_type == "лекція"

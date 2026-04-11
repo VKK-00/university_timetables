@@ -59,7 +59,8 @@ def test_normalize_document_merges_unambiguous_metadata_only_slot_row() -> None:
     rows = normalize_document(_make_document(records))
 
     assert len(rows) == 1
-    assert rows[0].subject == "Науковий образ світу (л)"
+    assert rows[0].subject == "Науковий образ світу"
+    assert rows[0].lesson_type == "лекція"
     assert rows[0].teacher == "доц. Заярна І. С."
     assert rows[0].room == "ауд. 403"
     assert "slot_metadata_merged" in rows[0].autofix_actions
