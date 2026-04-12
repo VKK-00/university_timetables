@@ -2229,3 +2229,87 @@ def test_normalize_record_applies_safe_program_label_aliases() -> None:
     row = normalize_record(record, document=ParsedDocument(asset=fetched, sheets=[]))
 
     assert row.program == "Генетичний аналіз"
+
+
+def test_sanitize_export_rows_demotes_tiny_econom_teacher_bucket() -> None:
+    rows = [
+        NormalizedRow(
+            program="Куліш В.A",
+            faculty="Економічний факультет",
+            week_type="Обидва",
+            day="Понеділок",
+            start_time="14:30",
+            end_time="15:50",
+            subject="Економіка галузевих ринків",
+            teacher="доц. Мартинюк Л.А.",
+            lesson_type="с",
+            notes="Куліш В.A.",
+            source_name="econom-schedule",
+            asset_locator="https://econom.knu.ua/for_students/schedule/rozklad/",
+        ),
+        NormalizedRow(
+            program="Куліш В.A",
+            faculty="Економічний факультет",
+            week_type="Обидва",
+            day="П'ятниця",
+            start_time="12:50",
+            end_time="14:10",
+            subject="Економіка галузевих ринків",
+            teacher="доц. Демидюк О.О.",
+            notes="Куліш В.A.",
+            source_name="econom-schedule",
+            asset_locator="https://econom.knu.ua/for_students/schedule/rozklad/",
+        ),
+    ]
+
+    accepted, review = sanitize_export_rows(rows, [])
+
+    assert not accepted
+    assert len(review) == 2
+    assert all("bad_program_label" in row.qa_flags for row in review)
+
+
+def test_sanitize_export_rows_demotes_tiny_history_course_bucket() -> None:
+    row = NormalizedRow(
+        program="Іноземна мова за професійним спрямуванням (з 10.03 по 21.04)",
+        faculty="Історичний факультет",
+        week_type="Обидва",
+        day="Вівторок",
+        start_time="14:40",
+        end_time="16:10",
+        subject="Іноземна мова для академічних цілей (з 03.03 по 14.04)",
+        course="3",
+        notes="Іноземна мова за професійним спрямуванням (з 10.03 по 21.04)",
+        source_name="history-schedule",
+        asset_locator="https://history.univ.kiev.ua/studentam/schedule/",
+    )
+
+    accepted, review = sanitize_export_rows([row], [])
+
+    assert not accepted
+    assert len(review) == 1
+    assert "bad_program_label" in review[0].qa_flags
+
+
+def test_sanitize_export_rows_demotes_tiny_history_course_bucket_with_trailing_dot_note() -> None:
+    row = NormalizedRow(
+        program="Історіографія історії України від найдавніших часів до початку ХХ ст",
+        faculty="Історичний факультет",
+        week_type="Обидва",
+        day="Середа",
+        start_time="16:20",
+        end_time="17:45",
+        subject="Давня, середньовічна та нова історія України",
+        teacher="проф. Короткий В.А.",
+        room="ауд. 340",
+        course="4",
+        notes="Історіографія історії України від найдавніших часів до початку ХХ ст.",
+        source_name="history-schedule",
+        asset_locator="https://history.univ.kiev.ua/studentam/schedule/",
+    )
+
+    accepted, review = sanitize_export_rows([row], [])
+
+    assert not accepted
+    assert len(review) == 1
+    assert "bad_program_label" in review[0].qa_flags

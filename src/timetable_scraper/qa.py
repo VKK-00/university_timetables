@@ -336,6 +336,21 @@ def _should_demote_tiny_program_bucket(rows: list[NormalizedRow]) -> bool:
         return True
     if source_name == "law-schedule" and len(rows) <= 3 and re.fullmatch(r"(?iu)\d+\s*академ\w*", program):
         return True
+    if source_name == "econom-schedule" and len(rows) <= 2:
+        if re.fullmatch(r"(?u)[А-ЯІЇЄҐ][а-яіїєґ'’ʼ-]+\s+[А-ЯІЇЄҐA-Z]\.(?:[А-ЯІЇЄҐA-Z]\.?)?", program):
+            return True
+        if (
+            all(_notes_anchor_program_label(row.notes, program) for row in rows)
+            and all(row.subject.strip() and normalize_service_tokens(row.subject) != program for row in rows)
+            and re.fullmatch(r"(?u)[А-ЯІЇЄҐ][а-яіїєґ'’ʼ-]+\s+[А-ЯІЇЄҐA-Z]\.(?:[А-ЯІЇЄҐA-Z]\.?)?", program)
+        ):
+            return True
+    if source_name == "history-schedule" and len(rows) <= 1:
+        if (
+            all(_notes_anchor_program_label(row.notes, program) for row in rows)
+            and all(row.subject.strip() and normalize_service_tokens(row.subject) != program for row in rows)
+        ):
+            return True
     if looks_like_bad_program_label(program):
         return True
     if any(pattern.search(program) for pattern in TINY_BAD_PROGRAM_PATTERNS):
@@ -464,7 +479,9 @@ def _notes_anchor_program_label(notes: str, program: str) -> bool:
         return False
     if cleaned_notes == cleaned_program:
         return True
-    return cleaned_notes.startswith(f"{cleaned_program}:")
+    if cleaned_notes in {f"{cleaned_program}.", f"{cleaned_program};", f"{cleaned_program},"}:
+        return True
+    return any(cleaned_notes.startswith(f"{cleaned_program}{suffix}") for suffix in (":", ";", ",", "."))
 
 
 def _looks_like_uppercase_subject_bucket(program: str) -> bool:
