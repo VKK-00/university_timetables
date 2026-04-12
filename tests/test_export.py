@@ -176,3 +176,25 @@ def test_export_rows_truncate_overlong_program_filenames(tmp_path: Path) -> None
     assert exported_files[0].exists()
     assert len(exported_files[0].stem) <= 120
     assert len(exported_files[0].parent.name) <= 80
+
+
+def test_export_rows_normalize_recovered_program_alias_for_filename(tmp_path: Path) -> None:
+    template_path = next(Path(".").glob("*.xlsx")).resolve()
+    rows = [
+        NormalizedRow(
+            program="",
+            faculty="ННЦ Інститут біології та медицини",
+            week_type="Обидва",
+            day="Понеділок",
+            start_time="08:30",
+            end_time="09:50",
+            subject="Біоінформатика",
+            groups="Генетичнии аналіз",
+            sheet_name="1 курс",
+        )
+    ]
+
+    exported_files, _, _ = export_rows(rows, [], template_path=template_path, output_dir=tmp_path / "out")
+
+    assert len(exported_files) == 1
+    assert exported_files[0].stem == "Генетичний аналіз"

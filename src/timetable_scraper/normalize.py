@@ -117,6 +117,8 @@ PROGRAM_LABEL_ALIASES = {
     "постійне": "Постійне",
     "постійний розклад": "Постійний розклад",
     "постiйний розклад": "Постійний розклад",
+    "генетичнии аналіз": "Генетичний аналіз",
+    "доклінічнии аналіз продуктів біотехнологіі": "Доклінічний аналіз продуктів біотехнології",
 }
 
 FILL_DOWN_FIELDS = ("week_type", "day", "start_time", "end_time")
@@ -137,6 +139,7 @@ MEETING_NOTE_RE = re.compile(r"(?iu)\b(?:meeting id|passcode|код доступ
 MEETING_ABBR_RE = re.compile(r"(?iu)^(?:ік|кд|id|pwd)\s*:")
 LESSON_TYPE_PATTERNS = (
     (re.compile(r"(?iu)\b(?:л|л\.|лек|лекція)\b"), "лекція"),
+    (re.compile(r"(?iu)\b(?:лекц|лекц\.|лекції)\b"), "лекція"),
     (re.compile(r"(?iu)\b(?:пр|пр\.|практ|практична)\b"), "практична"),
     (re.compile(r"(?iu)\b(?:лаб|лаб\.|лабораторна)\b"), "лабораторна"),
     (re.compile(r"(?iu)\b(?:сем|сем\.)\b"), "семінар"),
@@ -177,6 +180,9 @@ LESSON_TYPE_MARKER_VALUES = {
     "лек": "лекція",
     "лек.": "лекція",
     "лекція": "лекція",
+    "лекц": "лекція",
+    "лекц.": "лекція",
+    "лекції": "лекція",
     "lek": "лекція",
     "lek.": "лекція",
     "lecture": "лекція",
@@ -201,16 +207,34 @@ LESSON_TYPE_MARKER_VALUES = {
     "seminar": "семінар",
 }
 PURE_LESSON_TYPE_SUBJECT_RE = re.compile(
-    r"(?iu)^\(?\s*(?P<marker>л|л\.|лек|лек\.|лекція|lek|lek\.|lecture|пр|пр\.|практ|практ\.|практична|prac|prac\.|practical|лаб|лаб\.|лабораторна|lab|lab\.|сем|сем\.|семінар|sem|sem\.|seminar)\s*\)?$"
+    r"(?iu)^\(?\s*(?P<marker>л|л\.|лек|лек\.|лекц|лекц\.|лекції|лекція|lek|lek\.|lecture|пр|пр\.|практ|практ\.|практична|prac|prac\.|practical|лаб|лаб\.|лабораторна|lab|lab\.|сем|сем\.|семінар|sem|sem\.|seminar)\s*\)?$"
 )
 TRAILING_SUBJECT_MARKER_RE = re.compile(
     r"(?iu)(?P<prefix>.+?)\s*(?:[\[(]?\s*(?P<marker>іспит|екзамен|залік|захист|дист\.?|дистанц\.?|дистанційно)\s*[\])]?\.?)$"
 )
 LEADING_SUBJECT_MARKER_RE = re.compile(
-    r"(?iu)^(?:[\[(]?\s*)?(?P<marker>л|л\.|лек|лек\.|лекція|lek|lek\.|lecture|пр|пр\.|практ|практ\.|практична|prac|prac\.|practical|лаб|лаб\.|лабораторна|lab|lab\.|сем|сем\.|семінар|sem|sem\.|seminar)\s*[\])\].,:-]+\s*(?P<rest>.+)$"
+    r"(?iu)^(?:[\[(]?\s*)?(?P<marker>л|л\.|лек|лек\.|лекц|лекц\.|лекції|лекція|lek|lek\.|lecture|пр|пр\.|практ|практ\.|практична|prac|prac\.|practical|лаб|лаб\.|лабораторна|lab|lab\.|сем|сем\.|семінар|sem|sem\.|seminar)\s*[\])\].,:-]+\s*(?P<rest>.+)$"
+)
+LEADING_DATED_SUBJECT_RE = re.compile(
+    r"(?iu)^(?P<prefix>\d{1,2}\.\d{1,2}\.?(?:\s+модул\w*\.?)?)\s+(?P<rest>.+)$"
+)
+LEADING_DATE_LIST_SUBJECT_RE = re.compile(
+    r"(?iu)^(?P<prefix>(?:\d{1,2}(?:\.\d{1,2}(?:\.\d{2,4})?)?)(?:\s*,\s*\d{1,2}(?:\.\d{1,2}(?:\.\d{2,4})?)?)+(?:\s+[а-яіїєґ]+(?:\s+\d{4})?)?)\s+(?P<rest>.+)$"
+)
+LEADING_DATETIME_SUBJECT_RE = re.compile(
+    r"(?iu)^(?P<prefix>\d{1,2}\.\d{1,2}\.\d{2,4}\s+\d{1,2}[:.]\d{2})\s+(?P<rest>.+)$"
+)
+LEADING_EVENT_PREFIX_RE = re.compile(
+    r"(?iu)^(?P<prefix>\d{1,2}\.\d{1,2}\s*,\s*[^-]{3,80}-)\s*(?P<rest>.+)$"
+)
+LEADING_TIME_NOTICE_SUBJECT_RE = re.compile(
+    r"(?iu)^(?P<prefix>(?:лекц(?:ії|ія|\.|)|лек(?:ція|\.|)|практ(?:ичні|ична|\.|)|лаб(?:ораторні|ораторна|\.|))?\s*початок\s+о\s+\d{1,2}[:.]\d{2})\s+(?P<rest>.+)$"
 )
 TRAILING_TEACHER_FRAGMENT_RE = re.compile(
-    r"(?iu)^(?P<subject>.+?)\s*[.;,]?\s*(?P<teacher>(?:(?:проф|доц|ас|асист|викл|dr|prof)\.?\s+)?[А-ЯІЇЄҐA-Z][А-ЯІЇЄҐA-Zа-яіїєґa-z'’ʼ-]+(?:\s+[А-ЯІЇЄҐA-Z]\.?\s*){1,2})$"
+    r"(?iu)^(?P<subject>.+?)\s*[.;,]?\s*(?P<teacher>(?:(?:проф|доц|ас|асист|викл|dr|prof)\.?\s+)?[А-ЯІЇЄҐA-Z][А-ЯІЇЄҐA-Zа-яіїєґa-z'’ʼ-]+(?:\s+[А-ЯІЇЄҐA-Z]\.(?:\s*[А-ЯІЇЄҐA-Z]\.?)?|\s+[А-ЯІЇЄҐA-Z]\.?\s+[А-ЯІЇЄҐA-Z]\.?))$"
+)
+TRAILING_INITIAL_SURNAME_TEACHER_RE = re.compile(
+    r"(?u)^(?P<subject>.+?)\s*[.;,]?\s*(?P<teacher>[А-ЯІЇЄҐA-Z]\.\s*[А-ЯІЇЄҐA-Z][А-ЯІЇЄҐа-яіїєґa-z'’ʼ-]+)$"
 )
 SUBJECT_TRAILING_TIME_NOTE_RE = re.compile(r"(?iu)^(?P<subject>.+?)\s+(?P<note>на\s+\d{1,2}[:.]\d{2})$")
 GROUP_NOISE_MARKERS = {
@@ -790,6 +814,8 @@ def _normalize_program_label(value: str) -> str:
     cleaned = re.sub(r"(?<=[A-Za-z])(?=[А-ЯІЇЄҐа-яіїєґ])", " ", cleaned)
     cleaned = re.sub(r"(?<=[А-ЯІЇЄҐа-яіїєґ])(?=[A-Za-z])", " ", cleaned)
     cleaned = normalize_service_tokens(cleaned).strip(" !.,;:-")
+    if cleaned[:1].islower() and any(character.isupper() for character in cleaned[1:]):
+        cleaned = cleaned[:1].upper() + cleaned[1:]
     if not cleaned:
         return ""
     if looks_like_bad_program_label(cleaned):
@@ -1176,6 +1202,9 @@ def _postprocess_structured_fields(cleaned_fields: dict[str, str]) -> dict[str, 
         updated["room"] = _merge_unique([updated["room"], trailing_room])
     if trailing_notes:
         updated["notes"] = _merge_unique([updated["notes"], *trailing_notes])
+    updated["subject"], schedule_prefix_notes = _peel_subject_schedule_prefixes(updated["subject"])
+    if schedule_prefix_notes:
+        updated["notes"] = _merge_unique([updated["notes"], *schedule_prefix_notes])
     updated["subject"], trailing_teacher = _peel_trailing_teacher_from_subject(updated["subject"])
     if trailing_teacher:
         updated["teacher"] = _merge_unique([updated["teacher"], trailing_teacher])
@@ -1533,6 +1562,32 @@ def _peel_subject_noise_segments(subject: str) -> tuple[str, list[str]]:
     return _merge_unique(subject_segments, separator=" / "), note_segments
 
 
+def _peel_subject_schedule_prefixes(subject: str) -> tuple[str, list[str]]:
+    cleaned = normalize_service_tokens(subject)
+    if not cleaned:
+        return "", []
+    note_parts: list[str] = []
+    updated = cleaned
+    while True:
+        match = (
+            LEADING_TIME_NOTICE_SUBJECT_RE.fullmatch(updated)
+            or LEADING_DATETIME_SUBJECT_RE.fullmatch(updated)
+            or LEADING_DATED_SUBJECT_RE.fullmatch(updated)
+            or LEADING_DATE_LIST_SUBJECT_RE.fullmatch(updated)
+            or LEADING_EVENT_PREFIX_RE.fullmatch(updated)
+        )
+        if not match:
+            break
+        prefix = normalize_service_tokens(match.group("prefix")).strip(" ,;")
+        rest = normalize_service_tokens(match.group("rest")).strip(" ,;")
+        if not rest or rest == updated:
+            break
+        if prefix:
+            note_parts.append(prefix)
+        updated = rest
+    return updated, note_parts
+
+
 def _extract_leading_teacher_from_subject(subject: str) -> tuple[str, str]:
     cleaned = normalize_service_tokens(subject)
     segments = _split_segments(cleaned)
@@ -1552,7 +1607,7 @@ def _peel_trailing_teacher_from_subject(subject: str) -> tuple[str, str]:
     cleaned = normalize_service_tokens(subject)
     if not cleaned:
         return "", ""
-    match = TRAILING_TEACHER_FRAGMENT_RE.fullmatch(cleaned)
+    match = TRAILING_TEACHER_FRAGMENT_RE.fullmatch(cleaned) or TRAILING_INITIAL_SURNAME_TEACHER_RE.fullmatch(cleaned)
     if not match:
         return cleaned, ""
     subject_part = normalize_service_tokens(match.group("subject")).strip(" ,;/-")

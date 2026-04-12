@@ -137,6 +137,8 @@ def analyze_row_quality(row: NormalizedRow) -> NormalizedRow:
         flags.append("subject_contains_room")
     if subject and looks_like_teacher_text(subject):
         flags.append("subject_contains_teacher")
+    if subject and re.search(r"(?u)\b[А-ЯІЇЄҐ][а-яіїєґ'’ʼ-]+\s+[А-ЯІЇЄҐ]\.(?!\s*[А-ЯІЇЄҐ]\.)", subject):
+        flags.append("subject_contains_teacher")
     if subject and contains_link_text(subject):
         flags.append("subject_contains_link")
     if subject and looks_like_admin_text(subject):
@@ -146,6 +148,12 @@ def analyze_row_quality(row: NormalizedRow) -> NormalizedRow:
     if row.teacher and len(row.teacher) > 180:
         flags.append("teacher_too_long")
     if row.teacher and (LESSON_TEXT_RE.search(row.teacher) or re.search(r"\b\d{3,4}\b", row.teacher) or re.search(r"\b\d{1,2}[.:]\d{2}\b", row.teacher)):
+        flags.append("inconsistent_columns")
+    if row.room and (looks_like_teacher_text(row.room) or contains_link_text(row.room)):
+        flags.append("inconsistent_columns")
+    if row.room and len(row.room) > 80:
+        flags.append("inconsistent_columns")
+    if row.room and re.search(r"(?iu)\b(?:доц|проф|ас|асист|викл)\.?\b", row.room):
         flags.append("inconsistent_columns")
     if subject and looks_like_service_text(subject):
         flags.append("service_text_subject")
@@ -351,11 +359,21 @@ def _should_demote_tiny_program_bucket(rows: list[NormalizedRow]) -> bool:
     if source_name == "biomed-schedule" and len(rows) <= 2:
         if any(_looks_like_fragment_subject(row.subject) for row in rows):
             return True
+        if (
+            program.casefold() == "іноземна мова"
+            and all(_notes_anchor_program_label(row.notes, program) for row in rows)
+            and all(row.subject.strip() and normalize_service_tokens(row.subject) != program for row in rows)
+        ):
+            return True
     if source_name == "sociology-schedule" and len(rows) <= 3:
         lowered = program.casefold()
         if lowered in {"english", "англ.мова"}:
             return True
+        if re.fullmatch(r"(?iu)\d+\s*маг\b.*", program):
+            return True
         if re.fullmatch(r"(?iu)[лпс]-\d+\s*год\.?", program):
+            return True
+        if _looks_like_uppercase_subject_bucket(program):
             return True
         if looks_like_teacher_text(program) or re.fullmatch(r"(?u)[А-ЯІЇЄҐ][А-ЯІЇЄҐ'’ʼ-]+\s+[А-ЯІЇЄҐ]\.(?:\s*[А-ЯІЇЄҐ]\.?)?", program):
             return True
@@ -365,6 +383,15 @@ def _should_demote_tiny_program_bucket(rows: list[NormalizedRow]) -> bool:
         ) and all(
             row.subject.strip() and re.fullmatch(r"(?u)[А-ЯІЇЄҐA-Z][А-ЯІЇЄҐA-Z-]{3,}", row.subject.strip())
             for row in rows
+        ):
+            return True
+        subjects = {normalize_service_tokens(row.subject) for row in rows if row.subject.strip()}
+        if (
+            subjects
+            and len(subjects) == 1
+            and next(iter(subjects)) != program
+            and all(not row.groups.strip() for row in rows)
+            and all(_notes_anchor_program_label(row.notes, program) for row in rows)
         ):
             return True
     if source_name == "mechmat-schedule" and len(rows) <= 1:
@@ -393,6 +420,16 @@ def _looks_like_tiny_fragmented_program(program: str) -> bool:
         return True
     if looks_like_teacher_text(cleaned):
         return True
+    if cleaned.count("(") != cleaned.count(")"):
+        return True
+    if re.fullmatch(r"(?iu)[А-ЯІЇЄҐ'’ʼ-]+\s+[А-ЯІЇЄҐ]$", cleaned):
+        return True
+    if re.fullmatch(r"[A-Za-z0-9]{6,}(?:\.\d+)?", cleaned) and any(ch.isdigit() for ch in cleaned) and any(ch.isupper() for ch in cleaned) and any(ch.islower() for ch in cleaned):
+        return True
+    if re.fullmatch(r"(?iu)\([^)]{1,12}\)\s*\d.*", cleaned):
+        return True
+    if re.fullmatch(r"(?iu)\d{1,2}\.\d{1,2}\..*", cleaned):
+        return True
     if re.fullmatch(r"(?iu)(?:dr|prof|associate|assistant)\.?\s+[A-ZА-ЯІЇЄҐ][A-Za-zА-ЯІЇЄҐа-яіїєґ'’ʼ.-]+(?:\s+[A-ZА-ЯІЇЄҐ][A-Za-zА-ЯІЇЄҐа-яіїєґ'’ʼ.-]+){0,3}", cleaned):
         return True
     if cleaned[0].islower():
@@ -414,6 +451,34 @@ def _looks_like_tiny_fragmented_program(program: str) -> bool:
     if ";" in cleaned:
         return True
     if "+" in cleaned and LESSON_TEXT_RE.search(cleaned):
+        return True
+    if re.search(r"(?iu)\b\d+\s*год\.?", cleaned):
+        return True
+    return False
+
+
+def _notes_anchor_program_label(notes: str, program: str) -> bool:
+    cleaned_notes = normalize_service_tokens(notes)
+    cleaned_program = normalize_service_tokens(program)
+    if not cleaned_notes or not cleaned_program:
+        return False
+    if cleaned_notes == cleaned_program:
+        return True
+    return cleaned_notes.startswith(f"{cleaned_program}:")
+
+
+def _looks_like_uppercase_subject_bucket(program: str) -> bool:
+    cleaned = normalize_service_tokens(program)
+    if not cleaned:
+        return False
+    letters = [character for character in cleaned if character.isalpha()]
+    if not letters:
+        return False
+    if sum(1 for character in letters if character.isupper()) / len(letters) < 0.9:
+        return False
+    if re.search(r"(?iu)\((?:с|л|пр)\)?", cleaned):
+        return True
+    if re.search(r"(?iu)\b\d+\s*год\.?", cleaned):
         return True
     return False
 

@@ -53,7 +53,7 @@ STORAGE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{16,}$")
 NUMERIC_TOKEN_RE = re.compile(r"^\d+(?:[._-]\d+)*$")
 DATE_OR_TIME_LABEL_RE = re.compile(r"(?iu)^\d{2}\.\d{2}\.\d{4}(?:\s+\d{1,2}[:._]\d{2})?$")
 MEETING_CODE_RE = re.compile(r"(?iu)^[a-z]{3}-[a-z]{4}-[a-z]{3,4}$")
-OPAQUE_CODE_LABEL_RE = re.compile(r"^[A-Za-z0-9]{10,}(?:\.\d+)?$")
+OPAQUE_CODE_LABEL_RE = re.compile(r"^[A-Za-z0-9]{6,}(?:\.\d+)?$")
 LATIN_TEACHER_LABEL_RE = re.compile(
     r"(?u)^(?:(?:dr|prof|professor|associate professor|assistant|lecturer)\.?\s+)?"
     r"[A-Z][A-Za-z'’ʼ-]+(?:\s+[A-Z][A-Za-z'’ʼ-]+){1,3}$"
@@ -94,6 +94,9 @@ SERVICE_TEXT_PATTERNS = (
     re.compile(r"(?iu)\bнавчально-методичн"),
     re.compile(r"(?iu)\bстудентів\s+по\s+кафедрах\b"),
     re.compile(r"(?iu)\bнавчальний\s+рік\s+за\s+спеціальністю\b"),
+    re.compile(r"(?iu)\bзустріч\s+щодо\b"),
+    re.compile(r"(?iu)\bпочаток\s+о\s+\d{1,2}[:.]\d{2}\b"),
+    re.compile(r"(?iu)\bурочисте\s+вручення\s+заліковок\b"),
 )
 COMPACT_SERVICE_MARKERS = (
     "деньсамостійноїроботи",
@@ -127,6 +130,7 @@ BAD_PROGRAM_LABEL_PATTERNS = (
     re.compile(r"(?iu)^розклад\b.*$"),
     re.compile(r"(?iu)^rozklad\b.*$"),
     re.compile(r"(?iu)^schedule(?:\s+of\s+classes)?$"),
+    re.compile(r"(?iu)^schedule\s+of\s+classes\b.*$"),
     re.compile(r"(?iu)^timetable\b.*$"),
     re.compile(r"(?iu)^uploads$"),
     re.compile(r"(?iu)^upload$"),
@@ -140,11 +144,14 @@ BAD_PROGRAM_LABEL_PATTERNS = (
     re.compile(r"(?iu)^\d+\s*пара\b.*(?:\d{1,2}[:.]\d{2})"),
     re.compile(r"(?iu)^(?:[ivx]+|\d+)\s+група$"),
     re.compile(r"(?iu)^[12]\s*підгр\.?$"),
-    re.compile(r"(?iu)^\d+\s*курс$"),
+    re.compile(r"(?iu)^\d+\s*курс\b.*$"),
+    re.compile(r"(?iu)^\d+\s*магістр\w*.*$"),
+    re.compile(r"(?iu)^\d+\s*бакалавр\w*.*$"),
     re.compile(r"(?iu)^\d{4}\s+\d{4}\s+\d+\s*sem\b.*$"),
     re.compile(r"(?iu)^\d+\s*sem\.\b.*$"),
     re.compile(r"(?iu)^(?:\d+\s+){1,3}[A-Za-z0-9+/=_-]{6,}$"),
     re.compile(r"(?iu)^начитка!?$"),
+    re.compile(r"(?iu)^настановча(?:\s+сесія)?(?:\s+\d.*)?$"),
     re.compile(r"(?iu)^постійний(?:\s+розклад)?!?$"),
     re.compile(r"(?iu)^постійне!?$"),
     re.compile(r"(?iu)^списки?\s+груп$"),
@@ -154,6 +161,10 @@ BAD_PROGRAM_LABEL_PATTERNS = (
     re.compile(r"(?iu)^[а-яіїєґ'’ʼ-]+\s+факультету$"),
     re.compile(r"(?iu)^інституту\s+журналістики.*$"),
     re.compile(r"(?iu)^dr\.?\s+[A-ZА-ЯІЇЄҐ].*$"),
+    re.compile(r"(?iu)^(?:асп|доц|проф|асист|викл)\.?\s*[A-ZА-ЯІЇЄҐ].*$"),
+    re.compile(r"(?iu)^[ivxlcdm]+\s*потік\b.*$"),
+    re.compile(r"(?iu)^практ\.?\s+.*$"),
+    re.compile(r"(?iu)^чл\.-?кор\.?\s+.*$"),
     re.compile(r"(?iu)^english$"),
     re.compile(r"(?iu)^англ\.?\s*мова$"),
     re.compile(r"(?iu)^[лпс]-\d+\s*год\.?$"),
@@ -176,6 +187,10 @@ BAD_PROGRAM_COMPACT_MARKERS = {
     "начитка",
     "постійний",
     "постійне",
+}
+PROGRAM_CANDIDATE_ALIASES = {
+    "генетичнии аналіз": "Генетичний аналіз",
+    "доклінічнии аналіз продуктів біотехнологіі": "Доклінічний аналіз продуктів біотехнології",
 }
 PROGRAM_CODE_RE = re.compile(r"(?iu)\b(?:E\d{1,3}|0\d{2}|1\d{2})\b")
 SPACED_WEEKDAY_LABELS = {
@@ -451,6 +466,8 @@ def looks_like_bad_program_label(value: Any) -> bool:
         return True
     stripped = normalized_candidate.lstrip(" .,:;-")
     compact = re.sub(r"[\W_]+", "", text.casefold(), flags=re.UNICODE)
+    if " " not in text and len(text) >= 8 and any(character.isdigit() for character in text) and any(character.isalpha() for character in text):
+        return True
     if " " not in text and looks_like_storage_identifier(text):
         return True
     if looks_like_urlish_text(text):
@@ -469,6 +486,12 @@ def looks_like_bad_program_label(value: Any) -> bool:
     if count_program_codes(text) >= 2:
         return True
     if re.search(r"(?u)\b\d{3}\s+\d{3}\s+\d{4}\b", text):
+        return True
+    if _has_dangling_conjunction_segment(text):
+        return True
+    if _has_lowercase_followup_segment(text):
+        return True
+    if _looks_like_group_aggregate_program_label(text):
         return True
     if re.search(r"(?iu)\b(?:ауд|корп)\.?\b", text):
         return True
@@ -543,7 +566,7 @@ def normalize_program_candidate(value: Any) -> str:
             return ""
         if looks_like_technical_label(stripped) or looks_like_urlish_text(stripped):
             return ""
-        return stripped
+        return PROGRAM_CANDIDATE_ALIASES.get(stripped.casefold(), stripped)
 
     cleaned_segments: list[str] = []
     for segment in segments:
@@ -567,8 +590,9 @@ def normalize_program_candidate(value: Any) -> str:
     if not cleaned_segments:
         return ""
     if len(cleaned_segments) == 1:
-        return cleaned_segments[0]
-    return " ; ".join(normalize_whitespace(segment) for segment in cleaned_segments)
+        return PROGRAM_CANDIDATE_ALIASES.get(cleaned_segments[0].casefold(), cleaned_segments[0])
+    combined = " ; ".join(normalize_whitespace(segment) for segment in cleaned_segments)
+    return PROGRAM_CANDIDATE_ALIASES.get(combined.casefold(), combined)
 
 
 def _looks_like_opaque_code_label(text: str) -> bool:
@@ -641,6 +665,43 @@ def _looks_like_non_program_segment_combo(text: str) -> bool:
         )
         for segment in segments
     )
+
+
+def _has_dangling_conjunction_segment(text: str) -> bool:
+    segments = [normalize_service_tokens(segment).strip(" .,:;-") for segment in re.split(r"\s*;\s*", text) if normalize_service_tokens(segment).strip(" .,:;-")]
+    if not segments:
+        return False
+    for segment in segments:
+        lowered = segment.casefold()
+        if lowered in {"та", "і", "й", "and"}:
+            return True
+        if lowered.endswith((" та", " і", " й", " and")):
+            return True
+    return False
+
+
+def _has_lowercase_followup_segment(text: str) -> bool:
+    segments = [normalize_service_tokens(segment).strip(" .,:;-") for segment in re.split(r"\s*;\s*", text) if normalize_service_tokens(segment).strip(" .,:;-")]
+    if len(segments) < 2:
+        return False
+    return any(segment[:1].islower() for segment in segments[1:] if segment)
+
+
+def _looks_like_group_aggregate_program_label(text: str) -> bool:
+    segments = [normalize_service_tokens(segment).strip(" .,:;-") for segment in re.split(r"\s*;\s*", text) if normalize_service_tokens(segment).strip(" .,:;-")]
+    if not segments:
+        return False
+    group_segments = sum(1 for segment in segments if re.search(r"(?iu)\bгрупа\b", segment))
+    academic_segments = sum(1 for segment in segments if re.search(r"(?iu)\b(?:акад\w*|к[-\s]*ад\w*)\b", segment))
+    numeric_segments = sum(1 for segment in segments if re.fullmatch(r"\d+", segment))
+    stream_segments = sum(1 for segment in segments if re.search(r"(?iu)\b(?:[ivxlcdm]+|\d+)\s*потік\b", segment))
+    if group_segments >= 2:
+        return True
+    if stream_segments >= 1 and group_segments >= 1:
+        return True
+    if academic_segments >= 1 and (numeric_segments >= 1 or len(segments) >= 2):
+        return True
+    return False
 
 
 def _looks_like_room_label_fragment(value: str) -> bool:
@@ -747,8 +808,7 @@ def looks_like_spaced_weekday_label(value: Any) -> bool:
 
 
 def slugify_filename(value: str, fallback: str = "untitled") -> str:
-    text = unicodedata.normalize("NFKD", value)
-    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    text = unicodedata.normalize("NFC", value)
     text = re.sub(r"[<>:\"/\\\\|?*]+", "_", text)
     text = re.sub(r"\s+", " ", text).strip(" .")
     return text or fallback

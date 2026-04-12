@@ -139,6 +139,163 @@ def test_normalize_record_moves_session_marker_out_of_valid_subject() -> None:
     assert "Залік" in row.notes
 
 
+def test_normalize_record_extracts_leading_lesson_marker_from_subject() -> None:
+    asset = DiscoveredAsset(
+        source_name="fixture",
+        source_kind="zip",
+        source_url_or_path="fixtures.zip",
+        asset_kind="zip_entry",
+        locator="fixtures.zip::demo.xlsx",
+        display_name="demo.xlsx",
+    )
+    fetched = FetchedAsset(asset=asset, content=b"", content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", content_hash="abc", resolved_locator="demo.xlsx")
+    record = RawRecord(
+        values={
+            "program": "Demo",
+            "faculty": "Biomed",
+            "week_type": "Обидва",
+            "day": "Понеділок",
+            "start_time": "09:30",
+            "end_time": "10:50",
+            "subject": "Лекц. Гістологія",
+        },
+        row_index=3,
+        sheet_name="1 курс",
+        raw_excerpt="Лекц. Гістологія",
+    )
+    row = normalize_record(record, document=ParsedDocument(asset=fetched, sheets=[]))
+    assert row.subject == "Гістологія"
+    assert row.lesson_type == "лекція"
+
+
+def test_normalize_record_strips_schedule_prefixes_from_subject() -> None:
+    asset = DiscoveredAsset(
+        source_name="fixture",
+        source_kind="zip",
+        source_url_or_path="fixtures.zip",
+        asset_kind="zip_entry",
+        locator="fixtures.zip::demo.xlsx",
+        display_name="demo.xlsx",
+    )
+    fetched = FetchedAsset(asset=asset, content=b"", content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", content_hash="abc", resolved_locator="demo.xlsx")
+    record = RawRecord(
+        values={
+            "program": "Demo",
+            "faculty": "Biomed",
+            "week_type": "Обидва",
+            "day": "Вівторок",
+            "start_time": "11:20",
+            "end_time": "12:40",
+            "subject": "12, 19, 26 вересня Ендокринологія з оцінкою результатів досліджень Бердник І.О",
+        },
+        row_index=3,
+        sheet_name="1 курс",
+        raw_excerpt="12, 19, 26 вересня Ендокринологія з оцінкою результатів досліджень Бердник І.О",
+    )
+    row = normalize_record(record, document=ParsedDocument(asset=fetched, sheets=[]))
+    assert row.subject == "Ендокринологія з оцінкою результатів досліджень"
+    assert "12, 19, 26 вересня" in row.notes
+    assert "Бердник І.О" in row.teacher
+
+
+def test_normalize_record_strips_datetime_prefix_and_initial_surname_teacher() -> None:
+    asset = DiscoveredAsset(
+        source_name="fixture",
+        source_kind="zip",
+        source_url_or_path="fixtures.zip",
+        asset_kind="zip_entry",
+        locator="fixtures.zip::demo.xlsx",
+        display_name="demo.xlsx",
+    )
+    fetched = FetchedAsset(asset=asset, content=b"", content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", content_hash="abc", resolved_locator="demo.xlsx")
+    record = RawRecord(
+        values={
+            "program": "Demo",
+            "faculty": "Biomed",
+            "week_type": "Обидва",
+            "day": "Понеділок",
+            "start_time": "11:00",
+            "end_time": "12:20",
+            "subject": "24.06.2024 11:00 Виробнича лікарська практика А.Кізім",
+        },
+        row_index=3,
+        sheet_name="1 курс",
+        raw_excerpt="24.06.2024 11:00 Виробнича лікарська практика А.Кізім",
+    )
+    row = normalize_record(record, document=ParsedDocument(asset=fetched, sheets=[]))
+    assert row.subject == "Виробнича лікарська практика"
+    assert "24.06.2024 11:00" in row.notes
+    assert "А.Кізім" in row.teacher
+
+
+def test_normalize_record_demotes_ceremonial_subject_with_event_prefix() -> None:
+    asset = DiscoveredAsset(
+        source_name="fixture",
+        source_kind="zip",
+        source_url_or_path="fixtures.zip",
+        asset_kind="zip_entry",
+        locator="fixtures.zip::demo.xlsx",
+        display_name="demo.xlsx",
+    )
+    fetched = FetchedAsset(asset=asset, content=b"", content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", content_hash="abc", resolved_locator="demo.xlsx")
+    record = RawRecord(
+        values={
+            "program": "Demo",
+            "faculty": "Biomed",
+            "week_type": "Обидва",
+            "day": "Понеділок",
+            "start_time": "10:00",
+            "end_time": "11:20",
+            "subject": "01.09, пр-т Академіка Глушкова 2 212 10-00 - УРОЧИСТЕ ВРУЧЕННЯ ЗАЛІКОВОК СТУДЕНТАМ 1-ГО КУРСУ",
+        },
+        row_index=3,
+        sheet_name="1 курс",
+        raw_excerpt="01.09, пр-т Академіка Глушкова 2 212 10-00 - УРОЧИСТЕ ВРУЧЕННЯ ЗАЛІКОВОК СТУДЕНТАМ 1-ГО КУРСУ",
+    )
+    row = normalize_record(record, document=ParsedDocument(asset=fetched, sheets=[]))
+    assert row.subject == ""
+    assert "01.09" in row.notes
+    assert "УРОЧИСТЕ ВРУЧЕННЯ ЗАЛІКОВОК" in row.notes
+    accepted, review = partition_rows([row], threshold=0.74)
+    assert not accepted
+    assert len(review) == 1
+    assert "missing_subject" in review[0].qa_flags
+
+
+def test_normalize_record_demotes_service_meeting_subject() -> None:
+    asset = DiscoveredAsset(
+        source_name="fixture",
+        source_kind="zip",
+        source_url_or_path="fixtures.zip",
+        asset_kind="zip_entry",
+        locator="fixtures.zip::demo.xlsx",
+        display_name="demo.xlsx",
+    )
+    fetched = FetchedAsset(asset=asset, content=b"", content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", content_hash="abc", resolved_locator="demo.xlsx")
+    record = RawRecord(
+        values={
+            "program": "Demo",
+            "faculty": "Biomed",
+            "week_type": "Обидва",
+            "day": "Середа",
+            "start_time": "13:25",
+            "end_time": "14:45",
+            "subject": "09.03 Зустріч щодо можливості навчання на військовій кафедрі",
+        },
+        row_index=3,
+        sheet_name="1 курс",
+        raw_excerpt="09.03 Зустріч щодо можливості навчання на військовій кафедрі",
+    )
+    row = normalize_record(record, document=ParsedDocument(asset=fetched, sheets=[]))
+    assert row.subject == ""
+    assert "09.03" in row.notes
+    assert "Зустріч щодо можливості навчання на військовій кафедрі" in row.notes
+    accepted, review = partition_rows([row], threshold=0.74)
+    assert not accepted
+    assert len(review) == 1
+    assert "missing_subject" in review[0].qa_flags
+
+
 def test_normalize_record_drops_short_service_subject_into_review() -> None:
     asset = DiscoveredAsset(
         source_name="fixture",
@@ -431,7 +588,7 @@ def test_looks_like_bad_program_label_catches_geo_technical_tails() -> None:
     assert looks_like_bad_program_label("2 8 вересня (лекціі) 1 ии тиждень")
     assert looks_like_bad_program_label("СІЧЕНЬ ЛЮТИИ")
     assert looks_like_bad_program_label("АНГЛ.МОВА . ауд")
-    assert not looks_like_bad_program_label("Економічна географія ; Управління розвитком ; туризму та рекреації")
+    assert looks_like_bad_program_label("Економічна географія ; Управління розвитком ; туризму та рекреації")
 
 
 def test_sanitize_export_rows_ignores_technical_notes_as_program_hint() -> None:
@@ -581,6 +738,106 @@ def test_sanitize_export_rows_demotes_tiny_fragmented_geo_program() -> None:
             sheet_name="pdf-table-p1-t1",
             source_name="geo-schedule",
             asset_locator="https://geo.knu.ua/wp-content/uploads/2026/03/rozklad_2-k_2sem_2025-2026.pdf",
+        ),
+    ]
+
+    sanitized, review = sanitize_export_rows(accepted, [])
+
+    assert not sanitized
+    assert len(review) == 2
+    assert all("bad_program_label" in row.qa_flags for row in review)
+
+
+def test_sanitize_export_rows_demotes_tiny_fragmented_program_labels() -> None:
+    accepted = [
+        NormalizedRow(
+            program="FWdz09",
+            faculty="Географічний факультет",
+            week_type="Обидва",
+            day="Понеділок",
+            start_time="08:30",
+            end_time="09:50",
+            subject="Програмування",
+            teacher="Онищенко А.М.",
+            lesson_type="лекція",
+            room="ауд. 605",
+            groups="Управління та; екологія водних",
+            notes="FWdz09",
+            sheet_name="pdf-table-p4-t1",
+            source_name="geo-schedule",
+            asset_locator="https://geo.knu.ua/wp-content/uploads/2026/02/example.pdf",
+        ),
+        NormalizedRow(
+            program="FWdz09",
+            faculty="Географічний факультет",
+            week_type="Обидва",
+            day="Понеділок",
+            start_time="08:30",
+            end_time="09:50",
+            subject="Комп'ютерні технології",
+            teacher="Онищенко А.М.",
+            lesson_type="лекція",
+            room="ауд. 605",
+            groups="Управління та; екологія водних",
+            notes="FWdz09",
+            sheet_name="pdf-table-p4-t1",
+            source_name="geo-schedule",
+            asset_locator="https://geo.knu.ua/wp-content/uploads/2026/02/example.pdf",
+        ),
+        NormalizedRow(
+            program="БУРДІН Я",
+            faculty="Факультет соціології",
+            week_type="Обидва",
+            day="Вівторок",
+            start_time="14:00",
+            end_time="15:20",
+            subject="КУЛЬТУРНИХ ДОСЛІДЖЕНЬ",
+            lesson_type="практика",
+            groups="3 група",
+            notes=". БУРДІН Я.",
+            sheet_name="2 курс 2с 25-26",
+            source_name="sociology-schedule",
+            asset_locator="https://sociology.knu.ua/wp-content/uploads/2026/02/example.pdf",
+        ),
+    ]
+
+    sanitized, review = sanitize_export_rows(accepted, [])
+
+    assert not sanitized
+    assert len(review) == 3
+    assert all("bad_program_label" in row.qa_flags for row in review)
+
+
+def test_sanitize_export_rows_demotes_tiny_sociology_subject_buckets() -> None:
+    accepted = [
+        NormalizedRow(
+            program="СУЧАСНОГО СУСПІЛЬСТВА (С)",
+            faculty="Факультет соціології",
+            week_type="Обидва",
+            day="Понеділок",
+            start_time="17:10",
+            end_time="18:30",
+            subject="СОЦІАЛЬНІ ПРОБЛЕМИ",
+            teacher="доц. ЧЕРВІНСЬКА Т.Г.",
+            room="ауд. 311",
+            groups="2 група",
+            notes="СУЧАСНОГО СУСПІЛЬСТВА (С)",
+            source_name="sociology-schedule",
+            asset_locator="https://sociology.knu.ua/wp-content/uploads/2026/02/example.pdf",
+        ),
+        NormalizedRow(
+            program="1 МАГ 1с 24 25",
+            faculty="Факультет соціології",
+            week_type="Обидва",
+            day="Понеділок",
+            start_time="14:00",
+            end_time="15:20",
+            subject="ДИЗАЙН ДОСЛІДЖЕННЯ",
+            teacher="проф. САВЕЛЬЄВ Ю.Б.",
+            lesson_type="лекція",
+            course="1",
+            source_name="sociology-schedule",
+            asset_locator="https://sociology.knu.ua/wp-content/uploads/2026/02/example.pdf",
         ),
     ]
 
@@ -1537,8 +1794,7 @@ def test_normalize_record_replaces_bad_program_alias_with_non_bad_fallback() -> 
         raw_excerpt="Психологія розвитку",
     )
     row = normalize_record(record, document=ParsedDocument(asset=fetched, sheets=[]))
-    assert row.program
-    assert row.program != "Начитка"
+    assert row.program == "psy"
     assert not looks_like_bad_program_label(row.program)
 
 
@@ -1857,3 +2113,119 @@ def test_sanitize_export_rows_demotes_phys_academic_title_bucket() -> None:
     assert not accepted
     assert len(review) == 4
     assert all("bad_program_label" in row.qa_flags for row in review)
+
+
+def test_sanitize_export_rows_recovers_sociology_program_from_sheet_name() -> None:
+    row = NormalizedRow(
+        program="SCHEDULE OF CLASSES FACULTY OF SOCIOLOGY",
+        faculty="Факультет соціології",
+        week_type="Обидва",
+        day="Понеділок",
+        start_time="12:30",
+        end_time="13:50",
+        subject="КІЛЬКІСНИЙ АНАЛІЗ СОЦІАЛЬНИХ ДАНИХ",
+        confidence=0.99,
+        source_name="sociology-schedule",
+        source_root_url="https://sociology.knu.ua/uk/students",
+        asset_locator="https://docs.google.com/spreadsheets/d/1zzhy736wR1h_TfeAYIk1eIN2mtony7P_GEBTRBonJVA/edit?usp=sharing",
+        sheet_name="1 mag SOCIOLOGY",
+    )
+
+    accepted, review = sanitize_export_rows([row], [])
+
+    assert len(accepted) == 1
+    assert not review
+    assert accepted[0].program == "1 mag SOCIOLOGY"
+    assert "program_label_recovered" in accepted[0].autofix_actions
+
+
+def test_sanitize_export_rows_demotes_biomed_foreign_language_bucket() -> None:
+    row = NormalizedRow(
+        program="Іноземна мова",
+        faculty="ННЦ Інститут біології та медицини",
+        week_type="Обидва",
+        day="Понеділок",
+        start_time="10:10",
+        end_time="11:30",
+        subject="Гістологія",
+        teacher="Луценко О.В.",
+        lesson_type="лекція",
+        notes="Іноземна мова",
+        source_name="biomed-schedule",
+        asset_locator="https://biomed.knu.ua/students-postgraduates/general-information/rozklad-zaniat.html",
+    )
+
+    accepted, review = sanitize_export_rows([row], [])
+
+    assert not accepted
+    assert len(review) == 1
+    assert "bad_program_label" in review[0].qa_flags
+
+
+def test_sanitize_export_rows_demotes_tiny_sociology_notes_echo_bucket() -> None:
+    rows = [
+        NormalizedRow(
+            program="НЕРІВНОСТІ В СУЧАСНИХ СУСПІЛЬСТВАХ",
+            faculty="Факультет соціології",
+            week_type="Обидва",
+            day="Понеділок",
+            start_time="12:30",
+            end_time="13:50",
+            subject="ТЕОРІЯ І ПРАКТИКА ДОСЛІДЖЕНЬ",
+            teacher="проф. САВЕЛЬЄВ Ю.Б.",
+            notes="НЕРІВНОСТІ В СУЧАСНИХ СУСПІЛЬСТВАХ:",
+            course="1",
+            source_name="sociology-schedule",
+            asset_locator="https://sociology.knu.ua/uk/students",
+        ),
+        NormalizedRow(
+            program="НЕРІВНОСТІ В СУЧАСНИХ СУСПІЛЬСТВАХ",
+            faculty="Факультет соціології",
+            week_type="Обидва",
+            day="Середа",
+            start_time="14:00",
+            end_time="15:20",
+            subject="ТЕОРІЯ І ПРАКТИКА ДОСЛІДЖЕНЬ",
+            teacher="проф. САВЕЛЬЄВ Ю.Б.",
+            notes="НЕРІВНОСТІ В СУЧАСНИХ СУСПІЛЬСТВАХ:",
+            course="1",
+            source_name="sociology-schedule",
+            asset_locator="https://sociology.knu.ua/uk/students",
+        ),
+    ]
+
+    accepted, review = sanitize_export_rows(rows, [])
+
+    assert not accepted
+    assert len(review) == 2
+    assert all("bad_program_label" in row.qa_flags for row in review)
+
+
+def test_normalize_record_applies_safe_program_label_aliases() -> None:
+    asset = DiscoveredAsset(
+        source_name="fixture",
+        source_kind="zip",
+        source_url_or_path="fixtures.zip",
+        asset_kind="zip_entry",
+        locator="fixtures.zip::demo.xlsx",
+        display_name="demo.xlsx",
+    )
+    fetched = FetchedAsset(asset=asset, content=b"", content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", content_hash="abc", resolved_locator="demo.xlsx")
+    record = RawRecord(
+        values={
+            "program": "генетичнии аналіз",
+            "faculty": "ННІ високих технологій",
+            "week_type": "Обидва",
+            "day": "Понеділок",
+            "start_time": "09:00",
+            "end_time": "10:20",
+            "subject": "Біоінформатика",
+        },
+        row_index=3,
+        sheet_name="1 курс",
+        raw_excerpt="генетичнии аналіз",
+    )
+
+    row = normalize_record(record, document=ParsedDocument(asset=fetched, sheets=[]))
+
+    assert row.program == "Генетичний аналіз"

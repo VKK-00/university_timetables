@@ -9,7 +9,16 @@ from typing import Iterable
 from openpyxl import Workbook, load_workbook
 
 from .models import NormalizedRow
-from .utils import coalesce_label, coalesce_program_label, ensure_parent, infer_asset_label_from_locator, json_dumps, slugify_filename, truncate_sheet_title
+from .utils import (
+    coalesce_label,
+    coalesce_program_label,
+    ensure_parent,
+    infer_asset_label_from_locator,
+    json_dumps,
+    normalize_program_candidate,
+    slugify_filename,
+    truncate_sheet_title,
+)
 
 
 REVIEW_COLUMNS = [
@@ -382,13 +391,14 @@ def _export_faculty_label(row: NormalizedRow) -> str:
 
 
 def _export_program_label(row: NormalizedRow) -> str:
-    return coalesce_program_label(
+    label = coalesce_program_label(
         row.program,
         row.groups,
         infer_asset_label_from_locator(row.asset_locator),
         row.sheet_name,
         fallback="unknown program",
     ) or "unknown program"
+    return normalize_program_candidate(label) or label
 
 
 def _export_sheet_label(row: NormalizedRow) -> str:
