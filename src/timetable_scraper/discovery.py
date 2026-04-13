@@ -8,6 +8,7 @@ from urllib.parse import unquote, urldefrag, urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
 
+from .fetch import REQUEST_TIMEOUT_SECONDS, build_http_session, configure_http_session
 from .models import DiscoveredAsset, DiscoveryIssue, DiscoveryResult, SourceConfig
 from .utils import flatten_multiline, sha256_bytes
 
@@ -44,7 +45,8 @@ def discover_sources(sources: list[SourceConfig], session: requests.Session | No
     assets: list[DiscoveredAsset] = []
     issues: list[DiscoveryIssue] = []
     seen: set[tuple[str, str]] = set()
-    session = session or requests.Session()
+    session = configure_http_session(session) if isinstance(session, requests.Session) else session
+    session = session or build_http_session()
     for source in sources:
         result = discover_source(source, session=session)
         for asset in result.assets:
@@ -58,7 +60,8 @@ def discover_sources(sources: list[SourceConfig], session: requests.Session | No
 
 
 def discover_source(source: SourceConfig, session: requests.Session | None = None) -> DiscoveryResult:
-    session = session or requests.Session()
+    session = configure_http_session(session) if isinstance(session, requests.Session) else session
+    session = session or build_http_session()
     if source.kind == "folder":
         return _append_manual_assets(_discover_folder(source), source)
     if source.kind == "zip":
@@ -164,7 +167,7 @@ def _discover_web_page(
     visited.add(normalized_url)
 
     try:
-        response = session.get(url, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
+        response = session.get(url, timeout=REQUEST_TIMEOUT_SECONDS)
         response.raise_for_status()
     except Exception as exc:
         return DiscoveryResult(
@@ -280,7 +283,7 @@ def _discover_google_drive_folder(
     root_url: str,
 ) -> tuple[list[DiscoveredAsset], list[DiscoveryIssue]]:
     try:
-        response = session.get(folder_url, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
+        response = session.get(folder_url, timeout=REQUEST_TIMEOUT_SECONDS)
         response.raise_for_status()
     except Exception as exc:
         return [], [DiscoveryIssue(source_name=source.name, reason=str(exc), locator=folder_url)]
@@ -379,7 +382,7 @@ def _discover_dropfiles_category(
 
     files_url = f"{base_url}/index.php?option=com_dropfiles&view=frontfiles&format=json&id={category_id}"
     try:
-        files_response = session.get(files_url, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
+        files_response = session.get(files_url, timeout=REQUEST_TIMEOUT_SECONDS)
         files_response.raise_for_status()
         files_payload = files_response.json()
     except Exception as exc:
@@ -418,7 +421,7 @@ def _discover_dropfiles_category(
 
     categories_url = f"{base_url}/index.php?option=com_dropfiles&view=frontcategories&format=json&id={category_id}&top={top_category}"
     try:
-        categories_response = session.get(categories_url, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
+        categories_response = session.get(categories_url, timeout=REQUEST_TIMEOUT_SECONDS)
         categories_response.raise_for_status()
         categories_payload = categories_response.json()
     except Exception as exc:

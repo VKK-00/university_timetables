@@ -544,7 +544,15 @@ def _should_demote_tiny_program_bucket(rows: list[NormalizedRow]) -> bool:
         if note and DROP_REVIEW_SERVICE_RE.fullmatch(note):
             return True
     if source_name == "psy-schedule" and len(rows) <= 3:
+        normalized_notes = [
+            normalize_service_tokens(row.notes)
+            for row in rows
+            if normalize_service_tokens(row.notes)
+        ]
+        has_self_study_note = any(DROP_REVIEW_SERVICE_RE.fullmatch(note) for note in normalized_notes)
         if normalized_subjects == {"Базова загальновійськова підготовка"}:
+            return True
+        if has_self_study_note and "Базова загальновійськова підготовка" in normalized_subjects:
             return True
         if (
             len(rows) == 1
@@ -552,6 +560,8 @@ def _should_demote_tiny_program_bucket(rows: list[NormalizedRow]) -> bool:
             and rows[0].notes.strip()
             and not _notes_anchor_program_label(rows[0].notes, program)
         ):
+            return True
+        if len(rows) <= 2 and has_self_study_note and weak_groups:
             return True
     if source_name == "mechmat-schedule" and len(rows) <= 1:
         if "+" in program or LESSON_TEXT_RE.search(program):

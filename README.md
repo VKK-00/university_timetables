@@ -29,10 +29,10 @@
 
 Latest full KNU web run source of truth: April 13, 2026
 
-- `176` exported workbooks
-- `42802` accepted rows
-- `4664` review rows
-- `47376` rows with autofixes
+- `172` exported workbooks
+- `42803` accepted rows
+- `4671` review rows
+- `47384` rows with autofixes
 - `0` QA warnings
 - `0` QA failures
 
@@ -44,7 +44,7 @@ Current source statuses:
 
 Largest parsed sources in the current run:
 
-- `FIT: 29849 accepted, 775 review`
+- `FIT: 29857 accepted, 775 review`
 - `Physics: 4878 accepted, 1023 review`
 - `Sociology: 2816 accepted, 894 review`
 
@@ -233,12 +233,14 @@ If OCR dependencies are missing, `doctor` fails explicitly and `run` should not 
 
 Current non-parsed KNU statuses:
 
-- `confirmed-blocker`: `CSC`, `Military`, `IIR`, `Philology`
+- `confirmed-blocker`: `Mechmat`, `CSC`, `Military`, `IHT`, `IIR`, `Philology`
 
 Current blocker reasons:
 
+- `Mechmat`: the official source is discoverable, but extracted rows remain too noisy to export reliably
 - `CSC`: the official asset is no longer publicly available and now returns `HTTP 410`
 - `Military`: the official source is blocked by `HTTP 403 / Cloudflare`
+- `IHT`: the official PDF still extracts into rows that are too noisy to export reliably
 - `IIR`: official OneDrive-backed assets block anonymous download with `HTTP 403`
 - `Philology`: the official PDF still extracts into rows that are too noisy to export reliably
 

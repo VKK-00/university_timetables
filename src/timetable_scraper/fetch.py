@@ -6,12 +6,44 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from .models import DiscoveredAsset, FetchedAsset
 from .utils import ensure_parent, sha256_bytes
 
+REQUEST_TIMEOUT_SECONDS = 30
+DEFAULT_USER_AGENT = "Mozilla/5.0"
+_SESSION_CONFIGURED_ATTR = "_timetable_scraper_http_configured"
+
+
+def build_http_session() -> requests.Session:
+    return configure_http_session(requests.Session())
+
+
+def configure_http_session(session: requests.Session) -> requests.Session:
+    if getattr(session, _SESSION_CONFIGURED_ATTR, False):
+        return session
+    retry = Retry(
+        total=3,
+        connect=3,
+        read=3,
+        status=3,
+        backoff_factor=1.0,
+        allowed_methods=frozenset({"GET", "HEAD", "OPTIONS"}),
+        status_forcelist=(408, 429, 500, 502, 503, 504),
+        raise_on_status=False,
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    session.headers["User-Agent"] = DEFAULT_USER_AGENT
+    setattr(session, _SESSION_CONFIGURED_ATTR, True)
+    return session
+
 
 def fetch_asset(asset: DiscoveredAsset, session: requests.Session, cache_dir: Path) -> FetchedAsset:
+    session = configure_http_session(session)
     if asset.asset_kind == "local_file":
         path = Path(asset.locator)
         content = path.read_bytes()
@@ -45,14 +77,16 @@ def fetch_asset(asset: DiscoveredAsset, session: requests.Session, cache_dir: Pa
 
 
 def _fetch_remote(url: str, session: requests.Session) -> requests.Response:
-    response = session.get(url, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
+    session = configure_http_session(session)
+    response = session.get(url, timeout=REQUEST_TIMEOUT_SECONDS)
     response.raise_for_status()
     return response
 
 
 def _probe_remote(url: str, session: requests.Session) -> requests.Response | None:
     try:
-        return session.get(url, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
+        session = configure_http_session(session)
+        return session.get(url, timeout=REQUEST_TIMEOUT_SECONDS)
     except Exception:
         return None
 

@@ -9,7 +9,7 @@ import requests  # type: ignore[import-untyped]
 from .adapters import parse_asset
 from .discovery import discover_source, discover_sources
 from .export import export_rows, write_autofix_report
-from .fetch import fetch_asset
+from .fetch import build_http_session, fetch_asset
 from .models import AppConfig, DiscoveredAsset, DiscoveryIssue, DiscoveryResult, NormalizedRow, PipelineOutput, SourceConfig
 from .normalize import normalize_document
 from .qa import audit_exported_workbooks, partition_rows, refine_group_quality, sanitize_export_rows
@@ -41,7 +41,7 @@ class PipelineAccumulation:
 
 def run_pipeline(config: AppConfig) -> PipelineOutput:
     previous_summaries = load_previous_source_summaries(config.output_dir)
-    with requests.Session() as session:
+    with build_http_session() as session:
         accumulation = _collect_pipeline_batch(config, config.sources, session=session)
     return _finalize_pipeline_run(config, accumulation, previous_summaries=previous_summaries)
 
@@ -51,7 +51,7 @@ def run_pipeline_batched(config: AppConfig, *, batch_size: int = 5) -> PipelineO
         raise ValueError("batch_size must be at least 1")
     previous_summaries = load_previous_source_summaries(config.output_dir)
     accumulation = PipelineAccumulation()
-    with requests.Session() as session:
+    with build_http_session() as session:
         for source_batch in _iter_source_batches(config.sources, batch_size=batch_size):
             accumulation.extend(_collect_pipeline_batch(config, source_batch, session=session))
     return _finalize_pipeline_run(config, accumulation, previous_summaries=previous_summaries)
@@ -164,7 +164,7 @@ def _prepare_output_dir(output_dir: Path) -> None:
 
 
 def inspect_config_source(config: AppConfig, source_name: str | None = None) -> str:
-    session = requests.Session()
+    session = build_http_session()
     chunks: list[str] = []
     for source in config.sources:
         if source_name and source.name != source_name:

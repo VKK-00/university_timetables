@@ -2683,3 +2683,41 @@ def test_sanitize_export_rows_demotes_single_row_psy_practice_defense_bucket() -
     assert not accepted
     assert len(review) == 1
     assert "bad_program_label" in review[0].qa_flags
+
+
+def test_sanitize_export_rows_demotes_tiny_psy_self_study_note_bucket() -> None:
+    rows = [
+        NormalizedRow(
+            program="Соціальне консультування і лідерство 1 курс",
+            faculty="Факультет психології",
+            week_type="Обидва",
+            day="Четвер",
+            start_time="10:00",
+            end_time="12:50",
+            subject="Професійна та корпоративна етика (сем) . 412а __________________________",
+            teacher="доц. Москаленко А.М.",
+            notes="День самостійної роботи",
+            source_name="psy-schedule",
+            asset_locator="https://psy.knu.ua/study/schedule",
+        ),
+        NormalizedRow(
+            program="Соціальне консультування і лідерство 1 курс",
+            faculty="Факультет психології",
+            week_type="Обидва",
+            day="Четвер",
+            start_time="10:00",
+            end_time="12:50",
+            subject="Клієнтські групи в соціальній роботі(лек.) .",
+            teacher="доц. Васильєва-Халатникова М.О.",
+            course="1",
+            notes="День самостійної роботи",
+            source_name="psy-schedule",
+            asset_locator="https://psy.knu.ua/study/schedule",
+        ),
+    ]
+
+    accepted, review = sanitize_export_rows(rows, [])
+
+    assert not accepted
+    assert len(review) == 2
+    assert all("bad_program_label" in row.qa_flags for row in review)

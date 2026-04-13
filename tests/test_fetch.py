@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import requests
 
-from timetable_scraper.fetch import _fetch_onedrive_resolved, _resolve_content_type
+from timetable_scraper.fetch import _fetch_onedrive_resolved, _resolve_content_type, build_http_session, configure_http_session
 
 
 class StubResponse:
@@ -53,3 +53,24 @@ def test_resolve_content_type_sniffs_pdf_from_octet_stream() -> None:
     )
 
     assert _resolve_content_type(response, response.content, "https://example.edu/file") == "application/pdf"
+
+
+def test_configure_http_session_sets_retry_adapter_once() -> None:
+    session = requests.Session()
+
+    configured = configure_http_session(session)
+    configured_again = configure_http_session(configured)
+
+    assert configured is session
+    assert configured_again is session
+    assert session.headers["User-Agent"] == "Mozilla/5.0"
+    assert session.adapters["https://"].max_retries.total == 3
+    assert session.adapters["https://"].max_retries.read == 3
+
+
+def test_build_http_session_returns_configured_session() -> None:
+    session = build_http_session()
+
+    assert isinstance(session, requests.Session)
+    assert session.headers["User-Agent"] == "Mozilla/5.0"
+    assert session.adapters["http://"].max_retries.total == 3
