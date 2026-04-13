@@ -543,6 +543,16 @@ def _should_demote_tiny_program_bucket(rows: list[NormalizedRow]) -> bool:
         note = normalize_service_tokens(rows[0].notes)
         if note and DROP_REVIEW_SERVICE_RE.fullmatch(note):
             return True
+    if source_name == "psy-schedule" and len(rows) <= 3:
+        if normalized_subjects == {"Базова загальновійськова підготовка"}:
+            return True
+        if (
+            len(rows) == 1
+            and normalized_subjects == {"Захист навчальної практики"}
+            and rows[0].notes.strip()
+            and not _notes_anchor_program_label(rows[0].notes, program)
+        ):
+            return True
     if source_name == "mechmat-schedule" and len(rows) <= 1:
         if "+" in program or LESSON_TEXT_RE.search(program):
             return True

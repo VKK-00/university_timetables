@@ -2621,3 +2621,65 @@ def test_sanitize_export_rows_demotes_single_row_psy_self_study_bucket() -> None
     assert not accepted
     assert len(review) == 1
     assert "bad_program_label" in review[0].qa_flags
+
+
+def test_sanitize_export_rows_demotes_tiny_psy_military_bucket() -> None:
+    rows = [
+        NormalizedRow(
+            program='Соціальна педагогіка 2 курс "Бакалавр"',
+            faculty="Факультет психології",
+            week_type="Обидва",
+            day="Вівторок",
+            start_time="13:00",
+            end_time="14:20",
+            subject="Базова загальновійськова підготовка",
+            teacher="доц. Васильєва-Халатникова М.О.",
+            lesson_type="лекція",
+            course="2",
+            notes="Профілактика ризикованої поведінки підлітків та молоді(сем) . 412",
+            source_name="psy-schedule",
+            asset_locator="https://psy.knu.ua/study/schedule",
+        ),
+        NormalizedRow(
+            program='Соціальна педагогіка 2 курс "Бакалавр"',
+            faculty="Факультет психології",
+            week_type="Обидва",
+            day="Вівторок",
+            start_time="14:30",
+            end_time="15:50",
+            subject="Базова загальновійськова підготовка",
+            lesson_type="прак",
+            course="2",
+            source_name="psy-schedule",
+            asset_locator="https://psy.knu.ua/study/schedule",
+        ),
+    ]
+
+    accepted, review = sanitize_export_rows(rows, [])
+
+    assert not accepted
+    assert len(review) == 2
+    assert all("bad_program_label" in row.qa_flags for row in review)
+
+
+def test_sanitize_export_rows_demotes_single_row_psy_practice_defense_bucket() -> None:
+    row = NormalizedRow(
+        program='Психологія 3 курс "Бакалавр"',
+        faculty="Факультет психології",
+        week_type="Обидва",
+        day="Субота",
+        start_time="13:00",
+        end_time="14:20",
+        subject="Захист навчальної практики",
+        teacher="ас. Ладигіна О.В.",
+        groups="1 група (27); 2 група (28)",
+        notes="Патопсихологія(прак) (4 група)",
+        source_name="psy-schedule",
+        asset_locator="https://psy.knu.ua/study/schedule",
+    )
+
+    accepted, review = sanitize_export_rows([row], [])
+
+    assert not accepted
+    assert len(review) == 1
+    assert "bad_program_label" in review[0].qa_flags
