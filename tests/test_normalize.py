@@ -2721,3 +2721,129 @@ def test_sanitize_export_rows_demotes_tiny_psy_self_study_note_bucket() -> None:
     assert not accepted
     assert len(review) == 2
     assert all("bad_program_label" in row.qa_flags for row in review)
+
+
+def test_normalize_record_moves_fit_date_only_subject_to_notes() -> None:
+    asset = DiscoveredAsset(
+        source_name="fit-schedule",
+        source_kind="web_page",
+        source_url_or_path="https://fit.knu.ua/schedule",
+        asset_kind="file_url",
+        locator="https://fit.knu.ua/schedule.xlsx",
+        display_name="schedule.xlsx",
+    )
+    fetched = FetchedAsset(asset=asset, content=b"", content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", content_hash="abc", resolved_locator="schedule.xlsx")
+    record = RawRecord(
+        values={
+            "program": "ІПЗ, ІПЗм",
+            "faculty": "Факультет інформаційних технологій",
+            "week_type": "Обидва",
+            "day": "Понеділок",
+            "start_time": "13:40",
+            "end_time": "15:00",
+            "subject": "[01.12]",
+            "teacher": "Іванов Є. В.",
+            "lesson_type": "лабораторна",
+            "groups": "підгрупа ІПЗм-22",
+            "course": "2",
+        },
+        row_index=3,
+        sheet_name="ІПЗ, ІПЗм",
+        raw_excerpt="[01.12] Іванов Є. В.",
+    )
+
+    row = normalize_record(record, document=ParsedDocument(asset=fetched, sheets=[]))
+
+    assert row.subject == ""
+    assert "[01.12]" in row.notes
+
+
+def test_normalize_record_moves_fit_classroom_subject_to_notes() -> None:
+    asset = DiscoveredAsset(
+        source_name="fit-schedule",
+        source_kind="web_page",
+        source_url_or_path="https://fit.knu.ua/schedule",
+        asset_kind="file_url",
+        locator="https://fit.knu.ua/schedule.xlsx",
+        display_name="schedule.xlsx",
+    )
+    fetched = FetchedAsset(asset=asset, content=b"", content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", content_hash="abc", resolved_locator="schedule.xlsx")
+    record = RawRecord(
+        values={
+            "program": "АнД, КН, ТШІ",
+            "faculty": "Факультет інформаційних технологій",
+            "week_type": "Обидва",
+            "day": "Понеділок",
+            "start_time": "09:00",
+            "end_time": "10:20",
+            "subject": "classroom",
+            "teacher": "доц. Чолишкіна О.Г.",
+            "groups": "група АнД-21",
+            "course": "2",
+        },
+        row_index=3,
+        sheet_name="АнД, КН, ТШІ",
+        raw_excerpt="classroom",
+    )
+
+    row = normalize_record(record, document=ParsedDocument(asset=fetched, sheets=[]))
+
+    assert row.subject == ""
+    assert row.notes == "classroom"
+
+
+def test_normalize_record_capitalizes_lowercase_dotted_subject_abbreviation() -> None:
+    asset = DiscoveredAsset(
+        source_name="fit-schedule",
+        source_kind="web_page",
+        source_url_or_path="https://fit.knu.ua/schedule",
+        asset_kind="file_url",
+        locator="https://fit.knu.ua/schedule.xlsx",
+        display_name="schedule.xlsx",
+    )
+    fetched = FetchedAsset(asset=asset, content=b"", content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", content_hash="abc", resolved_locator="schedule.xlsx")
+    record = RawRecord(
+        values={
+            "program": "ІПЗ, ІПЗм",
+            "faculty": "Факультет інформаційних технологій",
+            "week_type": "Обидва",
+            "day": "Понеділок",
+            "start_time": "13:40",
+            "end_time": "15:00",
+            "subject": "техн.комп.бачення",
+            "teacher": "Порєв Г. В.",
+            "lesson_type": "лабораторна",
+            "groups": "підгрупа ІПЗм-22",
+            "course": "2",
+        },
+        row_index=3,
+        sheet_name="ІПЗ, ІПЗм",
+        raw_excerpt="техн.комп.бачення",
+    )
+
+    row = normalize_record(record, document=ParsedDocument(asset=fetched, sheets=[]))
+    accepted, review = partition_rows([row], threshold=0.74)
+
+    assert row.subject == "Техн.комп.бачення"
+    assert accepted
+    assert not review
+
+
+def test_sanitize_export_rows_drops_admin_only_review_rows() -> None:
+    row = NormalizedRow(
+        program="",
+        faculty="Факультет соціології",
+        week_type="Обидва",
+        day="П'ятниця",
+        start_time="17:30",
+        end_time="18:50",
+        subject="",
+        notes="ДЕКАН ФАКУЛЬТЕТУ СОЦІОЛОГІЇ ВАЛЕНТИНА ЧЕПАК",
+        source_name="sociology-schedule",
+        asset_locator="https://sociology.knu.ua/schedule.xlsx",
+    )
+
+    accepted, review = sanitize_export_rows([], [row])
+
+    assert not accepted
+    assert not review

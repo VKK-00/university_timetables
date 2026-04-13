@@ -30,9 +30,9 @@
 Latest full KNU web run source of truth: April 13, 2026
 
 - `172` exported workbooks
-- `42803` accepted rows
-- `4671` review rows
-- `47384` rows with autofixes
+- `42899` accepted rows
+- `4185` review rows
+- `46994` rows with autofixes
 - `0` QA warnings
 - `0` QA failures
 
@@ -44,9 +44,9 @@ Current source statuses:
 
 Largest parsed sources in the current run:
 
-- `FIT: 29857 accepted, 775 review`
-- `Physics: 4878 accepted, 1023 review`
-- `Sociology: 2816 accepted, 894 review`
+- `FIT: 29953 accepted, 531 review`
+- `Physics: 4878 accepted, 990 review`
+- `Sociology: 2816 accepted, 854 review`
 
 Detailed coverage and source-level status are documented in:
 

@@ -157,6 +157,11 @@ LOWERCASE_TEACHER_REMAINDER_RE = re.compile(r"(?iu)^[а-яіїєґ'’ʼ-]{2,24}
 CYRILLIC_TEXT_RE = re.compile(r"[А-ЯІЇЄҐа-яіїєґ]")
 SUBJECT_FRAGMENT_DATE_RE = re.compile(r"(?iu)^\d{2}\.\d{2}\.\d{4}(?:\s+\d{1,2}[:.]\d{2})?$")
 SUBJECT_FRAGMENT_DATE_LIST_RE = re.compile(r"(?iu)^\[\d{2}\.\d{2}(?:,\s*\d{2}\.\d{2})+\]$")
+SUBJECT_FRAGMENT_SINGLE_DATE_LIST_RE = re.compile(r"(?iu)^\[\d{2}\.\d{2}(?:,\s*\d{2}\.\d{2})*\]\.?$")
+SUBJECT_FRAGMENT_CLASSROOM_RE = re.compile(r"(?iu)^(?:classroom|google\s+classroom|гугл\s+клас:?\.?)$")
+SUBJECT_FRAGMENT_ID_RE = re.compile(r"(?iu)^(?:іd|id)\s*:\s*\d+(?:\s+\d+)+$")
+SUBJECT_FRAGMENT_INCLUDE_DATE_RE = re.compile(r"(?iu)^вкл\.?\s*\d{2}\.\d{2}\.?$")
+LOWERCASE_DOTTED_SUBJECT_RE = re.compile(r"(?iu)^[а-яіїєґ]{4,}(?:\.[а-яіїєґ]{2,}){1,}$")
 SUBJECT_FRAGMENT_LINK_RE = re.compile(
     r"(?i)(?:\?pwd=|[?&][a-z]{1,5}=|pwd=|zoom|teams|meet|us\d{2}web|knu-ua|meeting\s*id|passcode|\.com\b|\.us\b)"
 )
@@ -1191,6 +1196,7 @@ def _postprocess_structured_fields(cleaned_fields: dict[str, str]) -> dict[str, 
     updated = dict(cleaned_fields)
     updated["subject"], updated["teacher"] = _repair_split_teacher_prefix(updated["subject"], updated["teacher"])
     updated["groups"] = _cleanup_groups_field(updated["groups"])
+    updated["subject"] = _normalize_abbreviated_subject(updated["subject"])
     updated["subject"], leading_lesson = _peel_leading_lesson_marker(updated["subject"])
     if leading_lesson:
         updated["lesson_type"] = _merge_unique([updated["lesson_type"], leading_lesson])
@@ -1243,6 +1249,15 @@ def _postprocess_structured_fields(cleaned_fields: dict[str, str]) -> dict[str, 
         updated["notes"] = _merge_unique([updated["notes"], updated["subject"]])
         updated["subject"] = ""
     return updated
+
+
+def _normalize_abbreviated_subject(subject: str) -> str:
+    cleaned = normalize_service_tokens(subject)
+    if not cleaned:
+        return ""
+    if LOWERCASE_DOTTED_SUBJECT_RE.fullmatch(cleaned):
+        return cleaned[:1].upper() + cleaned[1:]
+    return cleaned
 
 
 def _normalize_subject_markers(cleaned_fields: dict[str, str]) -> dict[str, str]:
@@ -1649,6 +1664,14 @@ def _looks_like_subject_noise_segment(value: str) -> bool:
     if SUBJECT_FRAGMENT_DATE_RE.fullmatch(cleaned):
         return True
     if SUBJECT_FRAGMENT_DATE_LIST_RE.fullmatch(cleaned):
+        return True
+    if SUBJECT_FRAGMENT_SINGLE_DATE_LIST_RE.fullmatch(cleaned):
+        return True
+    if SUBJECT_FRAGMENT_CLASSROOM_RE.fullmatch(cleaned):
+        return True
+    if SUBJECT_FRAGMENT_ID_RE.fullmatch(cleaned):
+        return True
+    if SUBJECT_FRAGMENT_INCLUDE_DATE_RE.fullmatch(cleaned):
         return True
     if contains_link_text(cleaned) or MEETING_NOTE_RE.search(cleaned) or MEETING_ABBR_RE.search(cleaned):
         return True

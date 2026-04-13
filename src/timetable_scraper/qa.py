@@ -71,6 +71,9 @@ TINY_BAD_PROGRAM_PATTERNS = (
 DROP_REVIEW_SERVICE_RE = re.compile(
     r"(?iu)^(?:день\s+самост[іi]йної\s+роботи|самост[іi]й[-\s/]*н\w*(?:\s*/\s*|\s+)робот\w*|вільний\s+день)$"
 )
+DROP_REVIEW_TECHNICAL_RE = re.compile(
+    r"(?iu)^(?:classroom\.?|google\s+classroom\.?|гугл\s+клас:?\.?|\[\d{2}\.\d{2}(?:,\s*\d{2}\.\d{2})*\]\.?|вкл\.?\s*\d{2}\.\d{2}\.?|(?:іd|id)\s*:\s*\d+(?:\s+\d+)+|понедельник|вторник|среда|четверг|пятница|суббота|воскресенье)$"
+)
 
 
 def partition_rows(rows: list[NormalizedRow], threshold: float) -> tuple[list[NormalizedRow], list[NormalizedRow]]:
@@ -647,7 +650,7 @@ def _should_drop_non_schedule_review_row(row: NormalizedRow) -> bool:
     notes = normalize_service_tokens(row.notes)
     raw_excerpt = normalize_service_tokens(row.raw_excerpt)
 
-    if subject and DROP_REVIEW_SERVICE_RE.fullmatch(subject):
+    if subject and _looks_like_drop_review_text(subject):
         return True
     if subject:
         return False
@@ -655,7 +658,22 @@ def _should_drop_non_schedule_review_row(row: NormalizedRow) -> bool:
     evidence = [value for value in (lesson_type, notes, raw_excerpt) if value]
     if not evidence:
         return False
-    return any(DROP_REVIEW_SERVICE_RE.fullmatch(value) for value in evidence)
+    return any(_looks_like_drop_review_text(value) for value in evidence)
+
+
+def _looks_like_drop_review_text(value: str) -> bool:
+    cleaned = normalize_service_tokens(value)
+    if not cleaned:
+        return False
+    if DROP_REVIEW_SERVICE_RE.fullmatch(cleaned):
+        return True
+    if DROP_REVIEW_TECHNICAL_RE.fullmatch(cleaned):
+        return True
+    if looks_like_admin_text(cleaned):
+        return True
+    if looks_like_service_text(cleaned) and not re.search(r"(?iu)\b(?:іспит|залік|захист|екзамен)\b", cleaned):
+        return True
+    return False
 
 
 def _looks_like_uppercase_subject_bucket(program: str) -> bool:

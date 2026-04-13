@@ -98,6 +98,8 @@ SERVICE_TEXT_PATTERNS = (
     re.compile(r"(?iu)\bзустріч\s+щодо\b"),
     re.compile(r"(?iu)\bпочаток\s+о\s+\d{1,2}[:.]\d{2}\b"),
     re.compile(r"(?iu)\bурочисте\s+вручення\s+заліковок\b"),
+    re.compile(r"(?iu)\bgoogle\s+classroom\b"),
+    re.compile(r"(?iu)\bгугл\s+клас\b"),
 )
 COMPACT_SERVICE_MARKERS = (
     "деньсамостійноїроботи",
@@ -228,6 +230,12 @@ FORBIDDEN_SUBJECT_PATTERNS = (
     re.compile(r"(?iu)^самост[іi]й[-\s/]*н\w*(?:\s*/\s*|\s+)робот\w*$"),
     re.compile(r"(?iu)^день\s+самост[іi]йної\s+роботи$"),
     re.compile(r"(?iu)^вільний\s+день$"),
+    re.compile(r"(?iu)^(?:classroom|google\s+classroom)\.?$"),
+    re.compile(r"(?iu)^гугл\s+клас:?\.?$"),
+    re.compile(r"(?iu)^(?:іd|id)\s*:\s*\d+(?:\s+\d+)+$"),
+    re.compile(r"(?iu)^\[\d{2}\.\d{2}(?:,\s*\d{2}\.\d{2})*\]\.?$"),
+    re.compile(r"(?iu)^вкл\.?\s*\d{2}\.\d{2}\.?$"),
+    re.compile(r"(?iu)^(?:понедельник|вторник|среда|четверг|пятница|суббота|воскресенье)$"),
 )
 URLISH_TEXT_PATTERNS = (
     re.compile(r"(?iu)\bhttps?\s*:\s*/\s*/"),
