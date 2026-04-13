@@ -235,7 +235,11 @@ def sanitize_export_rows(accepted: list[NormalizedRow], review: list[NormalizedR
         buckets[(row.faculty, row.program)].append(row)
 
     for bucket_rows in buckets.values():
-        if _should_demote_tiny_program_bucket(bucket_rows):
+        if (
+            _should_force_review_biomed_subject_bucket(bucket_rows)
+            or _should_force_review_bucket_by_content(bucket_rows)
+            or _should_demote_tiny_program_bucket(bucket_rows)
+        ):
             for row in bucket_rows:
                 row.qa_flags = list(dict.fromkeys([*row.qa_flags, "bad_program_label"]))
                 row.qa_severity = "fail"
@@ -244,6 +248,80 @@ def sanitize_export_rows(accepted: list[NormalizedRow], review: list[NormalizedR
         final_rows.extend(bucket_rows)
 
     return final_rows, pending_review
+
+
+def _should_force_review_biomed_subject_bucket(rows: list[NormalizedRow]) -> bool:
+    if not rows:
+        return False
+    if rows[0].source_name.casefold() != "biomed-schedule" or len(rows) > 2:
+        return False
+    program = normalize_service_tokens(rows[0].program).casefold()
+    if not program:
+        return False
+    subjects = {
+        normalize_service_tokens(row.subject).casefold()
+        for row in rows
+        if row.subject.strip()
+    }
+    if subjects != {"іноземна мова"} and subjects != {"основи підприємництва"}:
+        return False
+    if any(normalize_service_tokens(row.groups) for row in rows):
+        return False
+    return all(normalize_service_tokens(row.notes).casefold().startswith(program) for row in rows)
+
+
+def _should_force_review_bucket_by_content(rows: list[NormalizedRow]) -> bool:
+    if not rows:
+        return False
+    program = normalize_program_candidate(rows[0].program)
+    source_name = rows[0].source_name.casefold()
+    anchored_program_notes = all(_notes_anchor_program_label(row.notes, program) for row in rows)
+    weak_groups = all(not row.groups.strip() for row in rows)
+    normalized_subjects = {
+        normalize_service_tokens(row.subject)
+        for row in rows
+        if row.subject.strip()
+    }
+    if source_name == "history-schedule" and len(rows) <= 3:
+        normalized_notes = [
+            normalize_service_tokens(row.notes).casefold()
+            for row in rows
+            if row.notes.strip()
+        ]
+        program_tokens = {
+            token
+            for token in re.findall(r"(?u)[а-яіїєґa-z]{5,}", program.casefold())
+            if token not in {"курс"}
+        }
+        if (
+            re.match(r"(?u)\d{3}\s+", program)
+            and weak_groups
+            and normalized_subjects
+            and all(subject != program for subject in normalized_subjects)
+            and len(normalized_notes) == len(rows)
+            and program_tokens
+            and all(any(token in note for token in program_tokens) for note in normalized_notes)
+        ):
+            return True
+    if source_name == "biomed-schedule" and len(rows) <= 2:
+        if (
+            anchored_program_notes
+            and weak_groups
+            and (
+                normalized_subjects == {"іноземна мова"}
+                or normalized_subjects == {"основи підприємництва"}
+            )
+        ):
+            return True
+    if source_name == "chem-schedule" and len(rows) <= 3:
+        if (
+            anchored_program_notes
+            and weak_groups
+            and len(normalized_subjects) == 1
+            and re.fullmatch(r"(?u)[A-ZА-ЯІЇЄҐ]{2,5}", next(iter(normalized_subjects)))
+        ):
+            return True
+    return False
 
 
 def _looks_like_fragment_subject(subject: str) -> bool:
@@ -325,6 +403,40 @@ def _should_demote_tiny_program_bucket(rows: list[NormalizedRow]) -> bool:
         return False
     program = normalize_program_candidate(rows[0].program)
     source_name = rows[0].source_name.casefold()
+    anchored_program_notes = all(_notes_anchor_program_label(row.notes, program) for row in rows)
+    weak_groups = all(not row.groups.strip() for row in rows)
+    normalized_subjects = {
+        normalize_service_tokens(row.subject)
+        for row in rows
+        if row.subject.strip()
+    }
+    if source_name == "history-schedule" and len(rows) <= 3:
+        if (
+            re.match(r"(?u)\d{3}\s+", program)
+            and anchored_program_notes
+            and weak_groups
+            and normalized_subjects
+            and all(subject != program for subject in normalized_subjects)
+        ):
+            return True
+    if source_name == "biomed-schedule" and len(rows) <= 2:
+        if (
+            anchored_program_notes
+            and weak_groups
+            and (
+                normalized_subjects == {"іноземна мова"}
+                or normalized_subjects == {"основи підприємництва"}
+            )
+        ):
+            return True
+    if source_name == "chem-schedule" and len(rows) <= 3:
+        if (
+            anchored_program_notes
+            and weak_groups
+            and len(normalized_subjects) == 1
+            and re.fullmatch(r"(?u)[A-ZА-ЯІЇЄҐ]{2,5}", next(iter(normalized_subjects)))
+        ):
+            return True
     if source_name == "phys-schedule":
         if re.fullmatch(r"(?iu)(?:акад|чл\.-?кор|с\.н\.с|[дк]\.[а-яіїєґ]\.-?[а-яіїєґ]\.[а-яіїєґ]\.?)", program):
             return True
@@ -340,14 +452,14 @@ def _should_demote_tiny_program_bucket(rows: list[NormalizedRow]) -> bool:
         if re.fullmatch(r"(?u)[А-ЯІЇЄҐ][а-яіїєґ'’ʼ-]+\s+[А-ЯІЇЄҐA-Z]\.(?:[А-ЯІЇЄҐA-Z]\.?)?", program):
             return True
         if (
-            all(_notes_anchor_program_label(row.notes, program) for row in rows)
+            anchored_program_notes
             and all(row.subject.strip() and normalize_service_tokens(row.subject) != program for row in rows)
             and re.fullmatch(r"(?u)[А-ЯІЇЄҐ][а-яіїєґ'’ʼ-]+\s+[А-ЯІЇЄҐA-Z]\.(?:[А-ЯІЇЄҐA-Z]\.?)?", program)
         ):
             return True
     if source_name == "history-schedule" and len(rows) <= 1:
         if (
-            all(_notes_anchor_program_label(row.notes, program) for row in rows)
+            anchored_program_notes
             and all(row.subject.strip() and normalize_service_tokens(row.subject) != program for row in rows)
         ):
             return True
@@ -376,7 +488,7 @@ def _should_demote_tiny_program_bucket(rows: list[NormalizedRow]) -> bool:
             return True
         if (
             program.casefold() == "іноземна мова"
-            and all(_notes_anchor_program_label(row.notes, program) for row in rows)
+            and anchored_program_notes
             and all(row.subject.strip() and normalize_service_tokens(row.subject) != program for row in rows)
         ):
             return True
@@ -405,8 +517,8 @@ def _should_demote_tiny_program_bucket(rows: list[NormalizedRow]) -> bool:
             subjects
             and len(subjects) == 1
             and next(iter(subjects)) != program
-            and all(not row.groups.strip() for row in rows)
-            and all(_notes_anchor_program_label(row.notes, program) for row in rows)
+            and weak_groups
+            and anchored_program_notes
         ):
             return True
     if source_name == "mechmat-schedule" and len(rows) <= 1:
@@ -479,9 +591,12 @@ def _notes_anchor_program_label(notes: str, program: str) -> bool:
         return False
     if cleaned_notes == cleaned_program:
         return True
-    if cleaned_notes in {f"{cleaned_program}.", f"{cleaned_program};", f"{cleaned_program},"}:
+    if re.fullmatch(rf"{re.escape(cleaned_program)}(?:\s*[\.;,:])+", cleaned_notes):
         return True
-    return any(cleaned_notes.startswith(f"{cleaned_program}{suffix}") for suffix in (":", ";", ",", "."))
+    return any(
+        re.match(rf"{re.escape(cleaned_program)}\s*{re.escape(suffix)}", cleaned_notes)
+        for suffix in (":", ";", ",", ".")
+    )
 
 
 def _looks_like_uppercase_subject_bucket(program: str) -> bool:

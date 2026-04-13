@@ -2313,3 +2313,173 @@ def test_sanitize_export_rows_demotes_tiny_history_course_bucket_with_trailing_d
     assert not accepted
     assert len(review) == 1
     assert "bad_program_label" in review[0].qa_flags
+
+
+def test_sanitize_export_rows_demotes_tiny_history_coded_program_bucket() -> None:
+    rows = [
+        NormalizedRow(
+            program="032 Історія та археологія",
+            faculty="Історичний факультет",
+            week_type="Обидва",
+            day="Понеділок",
+            start_time="13:05",
+            end_time="14:25",
+            subject="Академічне письмо англійською мовою",
+            teacher="Мусієнко А.П.",
+            notes="032 Історія та археологія ; к. , .",
+            source_name="history-schedule",
+            asset_locator="https://history.univ.kiev.ua/studentam/schedule/",
+        ),
+        NormalizedRow(
+            program="032 Історія та археологія",
+            faculty="Історичний факультет",
+            week_type="Обидва",
+            day="Середа",
+            start_time="16:20",
+            end_time="17:40",
+            subject="Актуальні проблеми сучасної зарубіжної етнології",
+            teacher="Конта Р.М.",
+            notes="032 Історія та археологія ; д.і.н., .",
+            source_name="history-schedule",
+            asset_locator="https://history.univ.kiev.ua/studentam/schedule/",
+        ),
+    ]
+
+    accepted, review = sanitize_export_rows(rows, [])
+
+    assert not accepted
+    assert len(review) == 2
+    assert all("bad_program_label" in row.qa_flags for row in review)
+
+
+def test_sanitize_export_rows_demotes_tiny_history_coded_program_bucket_with_partial_note_echo() -> None:
+    rows = [
+        NormalizedRow(
+            program="032 Історія та археологія",
+            faculty="Історичний факультет",
+            week_type="Обидва",
+            day="Понеділок",
+            start_time="13:05",
+            end_time="14:25",
+            subject="Академічне письмо англійською мовою",
+            teacher="Мусієнко А.П.",
+            notes="032 Історія та археологія ; к. , .",
+            source_name="history-schedule",
+            asset_locator="https://history.univ.kiev.ua/studentam/schedule/",
+        ),
+        NormalizedRow(
+            program="032 Історія та археологія",
+            faculty="Історичний факультет",
+            week_type="Обидва",
+            day="Середа",
+            start_time="14:40",
+            end_time="16:00",
+            subject="Цивілізаційні процеси в Європі",
+            teacher="Конта Р.М.",
+            notes="археологія ; д.і.н., . ; 032 Історія та",
+            source_name="history-schedule",
+            asset_locator="https://history.univ.kiev.ua/studentam/schedule/",
+        ),
+    ]
+
+    accepted, review = sanitize_export_rows(rows, [])
+
+    assert not accepted
+    assert len(review) == 2
+    assert all("bad_program_label" in row.qa_flags for row in review)
+
+
+def test_sanitize_export_rows_demotes_biomed_note_anchored_foreign_language_bucket() -> None:
+    row = NormalizedRow(
+        program="Генетичний аналіз",
+        faculty="ННЦ Інститут біології та медицини",
+        week_type="Обидва",
+        day="Понеділок",
+        start_time="08:40",
+        end_time="10:00",
+        subject="Іноземна мова",
+        teacher="ас. Пірко Н.М.; Курдіш О.К.",
+        notes="Генетичний аналіз .",
+        source_name="biomed-schedule",
+        asset_locator="https://biomed.knu.ua/students-postgraduates/general-information/rozklad-zaniat.html",
+    )
+
+    accepted, review = sanitize_export_rows([row], [])
+
+    assert not accepted
+    assert len(review) == 1
+    assert "bad_program_label" in review[0].qa_flags
+
+
+def test_sanitize_export_rows_demotes_biomed_note_anchored_entrepreneurship_bucket() -> None:
+    rows = [
+        NormalizedRow(
+            program="Доклінічний аналіз продуктів біотехнології",
+            faculty="ННЦ Інститут біології та медицини",
+            week_type="Обидва",
+            day="Вівторок",
+            start_time="10:10",
+            end_time="11:30",
+            subject="Основи підприємництва",
+            teacher="доц. Литвин О.О.",
+            notes="Доклінічний аналіз продуктів біотехнології .",
+            source_name="biomed-schedule",
+            asset_locator="https://biomed.knu.ua/students-postgraduates/general-information/rozklad-zaniat.html",
+        ),
+        NormalizedRow(
+            program="Доклінічний аналіз продуктів біотехнології",
+            faculty="ННЦ Інститут біології та медицини",
+            week_type="Обидва",
+            day="Середа",
+            start_time="10:10",
+            end_time="11:30",
+            subject="Основи підприємництва",
+            teacher="доц. Литвин О.О.",
+            notes="Доклінічний аналіз продуктів біотехнології .",
+            source_name="biomed-schedule",
+            asset_locator="https://biomed.knu.ua/students-postgraduates/general-information/rozklad-zaniat.html",
+        ),
+    ]
+
+    accepted, review = sanitize_export_rows(rows, [])
+
+    assert not accepted
+    assert len(review) == 2
+    assert all("bad_program_label" in row.qa_flags for row in review)
+
+
+def test_sanitize_export_rows_demotes_tiny_chem_acronym_bucket() -> None:
+    rows = [
+        NormalizedRow(
+            program="Асиметричний синтез",
+            faculty="Хімічний факультет",
+            week_type="Обидва",
+            day="Понеділок",
+            start_time="08:20",
+            end_time="09:40",
+            subject="ВХА",
+            teacher="ас. Ващенко Б.В.",
+            notes="Асиметричний синтез",
+            source_name="chem-schedule",
+            asset_locator="https://chem.knu.ua/schedules/",
+        ),
+        NormalizedRow(
+            program="Асиметричний синтез",
+            faculty="Хімічний факультет",
+            week_type="Обидва",
+            day="Понеділок",
+            start_time="09:50",
+            end_time="11:20",
+            subject="ВХА",
+            teacher="ас. Ващенко Б.В.",
+            notes="Асиметричний синтез",
+            source_name="chem-schedule",
+            asset_locator="https://chem.knu.ua/schedules/",
+        ),
+    ]
+
+    accepted, review = sanitize_export_rows(rows, [])
+
+    assert not accepted
+    assert len(review) == 2
+    assert all("bad_program_label" in row.qa_flags for row in review)
