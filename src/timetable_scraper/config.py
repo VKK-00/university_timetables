@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 
 import yaml
@@ -82,3 +83,35 @@ def load_config(config_path: str | Path) -> AppConfig:
         sources=sources,
         manual_assets_path=manual_assets_path,
     )
+
+
+def select_sources(config: AppConfig, source_names: Iterable[str] | None) -> AppConfig:
+    requested = _normalize_source_names(source_names)
+    if not requested:
+        return config
+
+    selected = [source for source in config.sources if source.name in requested]
+    selected_names = {source.name for source in selected}
+    missing = sorted(requested - selected_names)
+    if missing:
+        raise ValueError(f"Unknown source names: {', '.join(missing)}")
+
+    return AppConfig(
+        template_path=config.template_path,
+        output_dir=config.output_dir,
+        cache_dir=config.cache_dir,
+        confidence_threshold=config.confidence_threshold,
+        ocr_enabled=config.ocr_enabled,
+        sources=selected,
+        manual_assets_path=config.manual_assets_path,
+    )
+
+
+def _normalize_source_names(source_names: Iterable[str] | None) -> set[str]:
+    normalized: set[str] = set()
+    for raw in source_names or []:
+        for chunk in raw.split(","):
+            name = chunk.strip()
+            if name:
+                normalized.add(name)
+    return normalized

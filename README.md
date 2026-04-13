@@ -7,7 +7,7 @@
 ## Overview / Огляд
 
 - Fixed pipeline: `discover -> fetch -> parse -> normalize -> validate/confidence -> export -> post-run QA`
-- Main CLI entrypoints: `doctor`, `inspect-source`, `run`
+- Main CLI entrypoints: `doctor`, `inspect-source`, `run`, `run-batched`
 - Output is template-driven: row 1 contains the program title, row 2 contains headers, row 3+ contains normalized rows
 - Row-level QA keeps broken or ambiguous rows out of exported Excel and moves them into `review_queue.xlsx`
 - Autofixes are tracked per row and written into dedicated reports
@@ -27,26 +27,26 @@
 
 ## Current KNU Coverage / Поточне покриття КНУ
 
-Latest full KNU web run source of truth: April 9, 2026
+Latest full KNU web run source of truth: April 13, 2026
 
-- `250` exported workbooks
-- `43858` accepted rows
-- `2171` review rows
-- `45936` rows with autofixes
+- `176` exported workbooks
+- `42802` accepted rows
+- `4664` review rows
+- `47376` rows with autofixes
 - `0` QA warnings
 - `0` QA failures
 
 Current source statuses:
 
-- `parsed`: `Geo`, `Econom`, `History`, `Mechmat`, `FIT`, `Psychology`, `REX`, `Sociology`, `Physics`, `Philosophy`, `Chemistry`, `Law`, `IHT`, `Journalism`, `Geology`, `Biomed`
-- `confirmed-blocker`: `CSC`, `Military`, `IIR`, `Philology`
+- `parsed`: `Geo`, `Econom`, `History`, `FIT`, `Psychology`, `REX`, `Sociology`, `Physics`, `Philosophy`, `Chemistry`, `Law`, `Journalism`, `Geology`, `Biomed`
+- `confirmed-blocker`: `Mechmat`, `CSC`, `Military`, `IHT`, `IIR`, `Philology`
 - `review-only`: none
 
 Largest parsed sources in the current run:
 
-- `FIT: 27115 accepted, 254 review`
-- `Physics: 6552 accepted, 558 review`
-- `Sociology: 3941 accepted, 201 review`
+- `FIT: 29849 accepted, 775 review`
+- `Physics: 4878 accepted, 1023 review`
+- `Sociology: 2816 accepted, 894 review`
 
 Detailed coverage and source-level status are documented in:
 
@@ -96,6 +96,18 @@ Run the full KNU web coverage config:
 
 ```powershell
 python -m timetable_scraper run --config config/knu_web_schedule.yaml
+```
+
+Run the same config in segmented batches to avoid long single-pass runs:
+
+```powershell
+python -m timetable_scraper run-batched --config config/knu_web_schedule.yaml --batch-size 5
+```
+
+Run the focused smoke set for the most failure-prone KNU sources:
+
+```powershell
+python -m timetable_scraper run-batched --config config/knu_web_smoke.yaml --batch-size 3
 ```
 
 ## Config
@@ -248,6 +260,8 @@ python -m timetable_scraper doctor
 python -m timetable_scraper inspect-source --config config/sources.yaml
 python -m timetable_scraper run --config config/sources.yaml
 python -m timetable_scraper run --config config/knu_web_schedule.yaml
+python -m timetable_scraper run-batched --config config/knu_web_schedule.yaml --batch-size 5
+python -m timetable_scraper run-batched --config config/knu_web_smoke.yaml --batch-size 3
 ```
 
 ## Repository Metadata / Метадані репозиторію

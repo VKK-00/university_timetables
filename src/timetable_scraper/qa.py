@@ -68,6 +68,9 @@ TINY_BAD_PROGRAM_PATTERNS = (
     re.compile(r"(?iu)^\d+\s*курс\s*\([^)]{2,}\)$"),
     re.compile(r"(?iu)^.+\s+\((?:л|пр|лаб|сем)\)$"),
 )
+DROP_REVIEW_SERVICE_RE = re.compile(
+    r"(?iu)^(?:день\s+самост[іi]йної\s+роботи|самост[іi]й[-\s/]*н\w*(?:\s*/\s*|\s+)робот\w*|вільний\s+день)$"
+)
 
 
 def partition_rows(rows: list[NormalizedRow], threshold: float) -> tuple[list[NormalizedRow], list[NormalizedRow]]:
@@ -247,7 +250,8 @@ def sanitize_export_rows(accepted: list[NormalizedRow], review: list[NormalizedR
             continue
         final_rows.extend(bucket_rows)
 
-    return final_rows, pending_review
+    filtered_review = [row for row in pending_review if not _should_drop_non_schedule_review_row(row)]
+    return final_rows, filtered_review
 
 
 def _should_force_review_biomed_subject_bucket(rows: list[NormalizedRow]) -> bool:
@@ -429,6 +433,20 @@ def _should_demote_tiny_program_bucket(rows: list[NormalizedRow]) -> bool:
             )
         ):
             return True
+    if source_name == "biomed-schedule" and len(rows) <= 3:
+        normalized_notes = [
+            normalize_service_tokens(row.notes)
+            for row in rows
+            if normalize_service_tokens(row.notes)
+        ]
+        if (
+            program.casefold() == "лаб.діагностика бакалавр"
+            and len(normalized_notes) == len(rows)
+            and normalized_subjects == {"Ендокринологія з оцінкою результатів досліджень"}
+            and any(" ; " in note for note in normalized_notes)
+            and all(not _notes_anchor_program_label(row.notes, program) for row in rows)
+        ):
+            return True
     if source_name == "chem-schedule" and len(rows) <= 3:
         if (
             anchored_program_notes
@@ -521,6 +539,10 @@ def _should_demote_tiny_program_bucket(rows: list[NormalizedRow]) -> bool:
             and anchored_program_notes
         ):
             return True
+    if source_name == "psy-schedule" and len(rows) == 1:
+        note = normalize_service_tokens(rows[0].notes)
+        if note and DROP_REVIEW_SERVICE_RE.fullmatch(note):
+            return True
     if source_name == "mechmat-schedule" and len(rows) <= 1:
         if "+" in program or LESSON_TEXT_RE.search(program):
             return True
@@ -597,6 +619,23 @@ def _notes_anchor_program_label(notes: str, program: str) -> bool:
         re.match(rf"{re.escape(cleaned_program)}\s*{re.escape(suffix)}", cleaned_notes)
         for suffix in (":", ";", ",", ".")
     )
+
+
+def _should_drop_non_schedule_review_row(row: NormalizedRow) -> bool:
+    subject = normalize_service_tokens(row.subject)
+    lesson_type = normalize_service_tokens(row.lesson_type)
+    notes = normalize_service_tokens(row.notes)
+    raw_excerpt = normalize_service_tokens(row.raw_excerpt)
+
+    if subject and DROP_REVIEW_SERVICE_RE.fullmatch(subject):
+        return True
+    if subject:
+        return False
+
+    evidence = [value for value in (lesson_type, notes, raw_excerpt) if value]
+    if not evidence:
+        return False
+    return any(DROP_REVIEW_SERVICE_RE.fullmatch(value) for value in evidence)
 
 
 def _looks_like_uppercase_subject_bucket(program: str) -> bool:

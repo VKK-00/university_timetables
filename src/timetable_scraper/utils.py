@@ -72,6 +72,7 @@ SERVICE_TEXT_PATTERNS = (
     re.compile(r"(?iu)\bсписки\s+груп\b"),
     re.compile(r"(?iu)\bтеоретичне\s+навчання\b"),
     re.compile(r"(?iu)\bдень\s+самостійної\s+роботи\b"),
+    re.compile(r"(?iu)\bвільний\s+день\b"),
     re.compile(r"(?iu)\bкурс\s+за\s+вибором\b"),
     re.compile(r"(?iu)\bдисциплін\w*\s+вільного\s+вибору\b"),
     re.compile(r"(?iu)\bіноземна\s+мова\s*:\s*нормативний\s+курс\b"),
@@ -101,6 +102,8 @@ SERVICE_TEXT_PATTERNS = (
 COMPACT_SERVICE_MARKERS = (
     "деньсамостійноїроботи",
     "деньсамостiйноїроботи",
+    "вільнийдень",
+    "вiльнийдень",
     "курсзавибором",
     "дисциплінивільноговиборустудента",
     "дисциплінивільноговибору",
@@ -224,6 +227,7 @@ FORBIDDEN_SUBJECT_PATTERNS = (
     re.compile(r"(?iu)^самостійна\s+робота$"),
     re.compile(r"(?iu)^самост[іi]й[-\s/]*н\w*(?:\s*/\s*|\s+)робот\w*$"),
     re.compile(r"(?iu)^день\s+самост[іi]йної\s+роботи$"),
+    re.compile(r"(?iu)^вільний\s+день$"),
 )
 URLISH_TEXT_PATTERNS = (
     re.compile(r"(?iu)\bhttps?\s*:\s*/\s*/"),

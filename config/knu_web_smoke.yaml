@@ -1,0 +1,54 @@
+template_path: ../Шаблон.xlsx
+output_dir: ../out_knu_web_smoke
+cache_dir: ../.cache/timetable_scraper_knu_web_smoke
+confidence_threshold: 0.74
+ocr_enabled: true
+manual_assets_path: manual_assets.yaml
+sources:
+  - name: history-schedule
+    kind: web_page
+    url: https://history.univ.kiev.ua/studentam/schedule/
+    allow_domains:
+      - history.univ.kiev.ua
+      - history.knu.ua
+      - docs.google.com
+      - drive.google.com
+    follow_links_depth: 0
+  - name: fit-schedule
+    kind: web_page
+    url: https://fit.knu.ua/for-students/lessons-schedule
+    allow_domains:
+      - fit.knu.ua
+      - fit.univ.kiev.ua
+      - docs.google.com
+      - drive.google.com
+    follow_links_depth: 0
+  - name: sociology-schedule
+    kind: web_page
+    url: https://sociology.knu.ua/uk/students
+    allow_domains:
+      - sociology.knu.ua
+      - docs.google.com
+      - drive.google.com
+    follow_links_depth: 0
+  - name: phys-schedule
+    kind: web_page
+    url: https://phys.knu.ua/navchannya/rozklad-zanyat?ad
+    allow_domains:
+      - phys.knu.ua
+      - www.phys.knu.ua
+    follow_links_depth: 0
+  - name: chem-schedule
+    kind: web_page
+    url: https://chem.knu.ua/ua/teaching_resources/teaching_schedule/
+    allow_domains:
+      - chem.knu.ua
+    follow_links_depth: 0
+  - name: biomed-schedule
+    kind: web_page
+    url: https://biomed.knu.ua/students-postgraduates/general-information/rozklad-zaniat.html
+    allow_domains:
+      - biomed.knu.ua
+      - docs.google.com
+      - drive.google.com
+    follow_links_depth: 0

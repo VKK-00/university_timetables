@@ -2483,3 +2483,141 @@ def test_sanitize_export_rows_demotes_tiny_chem_acronym_bucket() -> None:
     assert not accepted
     assert len(review) == 2
     assert all("bad_program_label" in row.qa_flags for row in review)
+
+
+def test_sanitize_export_rows_drops_service_only_review_row() -> None:
+    row = NormalizedRow(
+        program="",
+        faculty="Фізичний факультет",
+        week_type="Обидва",
+        day="Понеділок",
+        start_time="08:40",
+        end_time="10:15",
+        subject="",
+        lesson_type="самостійна робота",
+        notes="День самостійної роботи",
+        source_name="phys-schedule",
+        asset_locator="https://phys.knu.ua/schedule/",
+        raw_excerpt="самостійна робота",
+    )
+
+    accepted, review = sanitize_export_rows([], [row])
+
+    assert not accepted
+    assert not review
+
+
+def test_sanitize_export_rows_drops_free_day_review_row() -> None:
+    row = NormalizedRow(
+        program="",
+        faculty="Факультет соціології",
+        week_type="Обидва",
+        day="П'ятниця",
+        start_time="10:10",
+        end_time="11:30",
+        subject="Вільний день",
+        source_name="sociology-schedule",
+        asset_locator="https://sociology.knu.ua/schedule/",
+    )
+
+    accepted, review = sanitize_export_rows([], [row])
+
+    assert not accepted
+    assert not review
+
+
+def test_sanitize_export_rows_keeps_exam_review_row() -> None:
+    row = NormalizedRow(
+        program="",
+        faculty="Економічний факультет",
+        week_type="Обидва",
+        day="Четвер",
+        start_time="12:20",
+        end_time="13:55",
+        subject="ІСПИТ",
+        source_name="econom-schedule",
+        asset_locator="https://econom.knu.ua/for_students/schedule/rozklad/",
+    )
+
+    accepted, review = sanitize_export_rows([], [row])
+
+    assert not accepted
+    assert len(review) == 1
+    assert review[0].subject == "ІСПИТ"
+
+
+def test_sanitize_export_rows_demotes_tiny_biomed_labdiag_bucket() -> None:
+    rows = [
+        NormalizedRow(
+            program="Лаб.діагностика бакалавр",
+            faculty="ННЦ Інститут біології та медицини",
+            week_type="Обидва",
+            day="Вівторок",
+            start_time="12:30",
+            end_time="14:45",
+            subject="Ендокринологія з оцінкою результатів досліджень",
+            teacher="ас. Гомон Н.М.; Бердник І.О",
+            notes="Іноземна мова",
+            course="2",
+            source_name="biomed-schedule",
+            asset_locator="https://biomed.knu.ua/students-postgraduates/general-information/rozklad-zaniat.html",
+        ),
+        NormalizedRow(
+            program="Лаб.діагностика бакалавр",
+            faculty="ННЦ Інститут біології та медицини",
+            week_type="Обидва",
+            day="Середа",
+            start_time="15:00",
+            end_time="16:20",
+            subject="Ендокринологія з оцінкою результатів досліджень",
+            teacher="доц. Цирюк О.І.; Бердник І.О",
+            notes="Маніпуляційна техніка в клінічній медицині (12,19,26 вересня) ; 12, 19, 26 вересня",
+            groups="1 група",
+            course="2",
+            source_name="biomed-schedule",
+            asset_locator="https://biomed.knu.ua/students-postgraduates/general-information/rozklad-zaniat.html",
+        ),
+        NormalizedRow(
+            program="Лаб.діагностика бакалавр",
+            faculty="ННЦ Інститут біології та медицини",
+            week_type="Обидва",
+            day="Четвер",
+            start_time="15:00",
+            end_time="16:20",
+            subject="Ендокринологія з оцінкою результатів досліджень",
+            teacher="проф. Берегова Т.В.; Бердник І.О",
+            notes="Фармакологія та медична рецептура . (6,13,20,27 вересня) ; 6, 13, 27 вересня",
+            groups="1 група",
+            course="2",
+            source_name="biomed-schedule",
+            asset_locator="https://biomed.knu.ua/students-postgraduates/general-information/rozklad-zaniat.html",
+        ),
+    ]
+
+    accepted, review = sanitize_export_rows(rows, [])
+
+    assert not accepted
+    assert len(review) == 3
+    assert all("bad_program_label" in row.qa_flags for row in review)
+
+
+def test_sanitize_export_rows_demotes_single_row_psy_self_study_bucket() -> None:
+    row = NormalizedRow(
+        program='Клінічна психологія 2 курс "Магістр"',
+        faculty="Факультет психології",
+        week_type="Обидва",
+        day="Вівторок",
+        start_time="08:30",
+        end_time="11:20",
+        subject="Клінічна психодіагностика: практикум (лек.) .",
+        teacher="ас. Вавілова А.С.",
+        notes="День самостійної роботи",
+        source_name="psy-schedule",
+        asset_locator="https://psy.knu.ua/study/schedule",
+    )
+
+    accepted, review = sanitize_export_rows([row], [])
+
+    assert not accepted
+    assert len(review) == 1
+    assert "bad_program_label" in review[0].qa_flags

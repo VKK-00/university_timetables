@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import requests  # type: ignore[import-untyped]
@@ -9,7 +10,7 @@ from .adapters import parse_asset
 from .discovery import discover_source, discover_sources
 from .export import export_rows, write_autofix_report
 from .fetch import fetch_asset
-from .models import AppConfig, PipelineOutput
+from .models import AppConfig, DiscoveredAsset, DiscoveryIssue, DiscoveryResult, NormalizedRow, PipelineOutput, SourceConfig
 from .normalize import normalize_document
 from .qa import audit_exported_workbooks, partition_rows, refine_group_quality, sanitize_export_rows
 from .reporting import (
@@ -21,27 +22,78 @@ from .reporting import (
 )
 
 
+@dataclass(slots=True)
+class PipelineAccumulation:
+    discovery_assets: list[DiscoveredAsset] = field(default_factory=list)
+    discovery_issues: list[DiscoveryIssue] = field(default_factory=list)
+    normalized_rows: list[NormalizedRow] = field(default_factory=list)
+    attempted_assets: Counter[str] = field(default_factory=Counter)
+    runtime_issues: dict[str, list[str]] = field(default_factory=lambda: defaultdict(list))
+
+    def extend(self, other: "PipelineAccumulation") -> None:
+        self.discovery_assets.extend(other.discovery_assets)
+        self.discovery_issues.extend(other.discovery_issues)
+        self.normalized_rows.extend(other.normalized_rows)
+        self.attempted_assets.update(other.attempted_assets)
+        for source_name, issues in other.runtime_issues.items():
+            self.runtime_issues[source_name].extend(issues)
+
+
 def run_pipeline(config: AppConfig) -> PipelineOutput:
-    session = requests.Session()
     previous_summaries = load_previous_source_summaries(config.output_dir)
-    discovery = discover_sources(config.sources, session=session)
-    normalized_rows = []
-    attempted_assets: Counter[str] = Counter()
-    runtime_issues: dict[str, list[str]] = defaultdict(list)
+    with requests.Session() as session:
+        accumulation = _collect_pipeline_batch(config, config.sources, session=session)
+    return _finalize_pipeline_run(config, accumulation, previous_summaries=previous_summaries)
+
+
+def run_pipeline_batched(config: AppConfig, *, batch_size: int = 5) -> PipelineOutput:
+    if batch_size < 1:
+        raise ValueError("batch_size must be at least 1")
+    previous_summaries = load_previous_source_summaries(config.output_dir)
+    accumulation = PipelineAccumulation()
+    with requests.Session() as session:
+        for source_batch in _iter_source_batches(config.sources, batch_size=batch_size):
+            accumulation.extend(_collect_pipeline_batch(config, source_batch, session=session))
+    return _finalize_pipeline_run(config, accumulation, previous_summaries=previous_summaries)
+
+
+def _collect_pipeline_batch(
+    config: AppConfig,
+    sources: list[SourceConfig],
+    *,
+    session: requests.Session,
+) -> PipelineAccumulation:
+    discovery = discover_sources(list(sources), session=session)
+    accumulation = PipelineAccumulation(
+        discovery_assets=list(discovery.assets),
+        discovery_issues=list(discovery.issues),
+    )
 
     for asset in discovery.assets:
-        attempted_assets[asset.source_name] += 1
+        accumulation.attempted_assets[asset.source_name] += 1
         try:
             fetched = fetch_asset(asset, session=session, cache_dir=config.cache_dir)
             parsed = parse_asset(fetched, ocr_enabled=config.ocr_enabled)
             rows = normalize_document(parsed)
-            normalized_rows.extend(rows)
+            accumulation.normalized_rows.extend(rows)
             if not rows and parsed.warnings:
-                runtime_issues[asset.source_name].extend(parsed.warnings)
+                accumulation.runtime_issues[asset.source_name].extend(parsed.warnings)
         except Exception as exc:
-            runtime_issues[asset.source_name].append(f"{exc.__class__.__name__}: {exc}")
+            accumulation.runtime_issues[asset.source_name].append(f"{exc.__class__.__name__}: {exc}")
+    return accumulation
 
-    accepted, review = partition_rows(normalized_rows, threshold=config.confidence_threshold)
+
+def _finalize_pipeline_run(
+    config: AppConfig,
+    accumulation: PipelineAccumulation,
+    *,
+    previous_summaries,
+) -> PipelineOutput:
+    discovery = DiscoveryResult(
+        assets=list(accumulation.discovery_assets),
+        issues=list(accumulation.discovery_issues),
+    )
+    accepted, review = partition_rows(accumulation.normalized_rows, threshold=config.confidence_threshold)
     accepted, review = refine_group_quality(accepted, review)
     accepted, review = sanitize_export_rows(accepted, review)
     _prepare_output_dir(config.output_dir)
@@ -65,8 +117,8 @@ def run_pipeline(config: AppConfig) -> PipelineOutput:
         discovery,
         accepted,
         review,
-        attempted_assets=attempted_assets,
-        runtime_issues=runtime_issues,
+        attempted_assets=accumulation.attempted_assets,
+        runtime_issues=accumulation.runtime_issues,
     )
     source_summary_path, source_report_path = write_source_summaries(source_summaries, output_dir=config.output_dir)
     run_delta_path = write_run_delta(source_summaries, previous_summaries, output_dir=config.output_dir)
@@ -91,6 +143,11 @@ def run_pipeline(config: AppConfig) -> PipelineOutput:
         workbook_qa=workbook_qa,
         source_summaries=source_summaries,
     )
+
+
+def _iter_source_batches(sources: list[SourceConfig], *, batch_size: int):
+    for index in range(0, len(sources), batch_size):
+        yield sources[index : index + batch_size]
 
 
 def _prepare_output_dir(output_dir: Path) -> None:

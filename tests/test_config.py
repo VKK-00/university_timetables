@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from timetable_scraper.config import load_config
+import pytest
+
+from timetable_scraper.config import load_config, select_sources
+from timetable_scraper.models import AppConfig, SourceConfig
 
 
 def test_load_config_attaches_manual_assets_to_sources(tmp_path: Path) -> None:
@@ -48,3 +51,38 @@ sources:
     assert iir_source.manual_assets[0].url == "https://example.edu/direct/iir.xlsx"
     assert iir_source.manual_assets[0].display_name == "Direct IIR workbook"
     assert not phys_source.manual_assets
+
+
+def test_select_sources_filters_config_and_preserves_order(tmp_path: Path) -> None:
+    config = AppConfig(
+        template_path=Path("Шаблон.xlsx").resolve(),
+        output_dir=tmp_path / "out",
+        cache_dir=tmp_path / "cache",
+        confidence_threshold=0.74,
+        ocr_enabled=False,
+        sources=[
+            SourceConfig(kind="web_page", name="history-schedule", url="https://example.test/history"),
+            SourceConfig(kind="web_page", name="fit-schedule", url="https://example.test/fit"),
+            SourceConfig(kind="web_page", name="phys-schedule", url="https://example.test/phys"),
+        ],
+    )
+
+    selected = select_sources(config, ["phys-schedule,history-schedule"])
+
+    assert [source.name for source in selected.sources] == ["history-schedule", "phys-schedule"]
+    assert selected.template_path == config.template_path
+    assert selected.output_dir == config.output_dir
+
+
+def test_select_sources_rejects_unknown_source_names(tmp_path: Path) -> None:
+    config = AppConfig(
+        template_path=Path("Шаблон.xlsx").resolve(),
+        output_dir=tmp_path / "out",
+        cache_dir=tmp_path / "cache",
+        confidence_threshold=0.74,
+        ocr_enabled=False,
+        sources=[SourceConfig(kind="web_page", name="fit-schedule", url="https://example.test/fit")],
+    )
+
+    with pytest.raises(ValueError, match="Unknown source names: phys-schedule"):
+        select_sources(config, ["fit-schedule", "phys-schedule"])
