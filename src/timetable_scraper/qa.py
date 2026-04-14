@@ -52,6 +52,7 @@ EXTENDED_DURATION_SUBJECT_RE = re.compile(
     r"(?iu)\b(?:кваліфікаційн\w+\s+робот\w+|захист\w+|атестаці\w+|dissertation|thesis)\b"
 )
 ABBREVIATED_SUBJECT_RE = re.compile(r"(?iu)^(?:ст|ас|доц|проф|викл)\.?$")
+LOWERCASE_DOTTED_VALID_SUBJECT_RE = re.compile(r"(?iu)^[а-яіїєґ]{4,}(?:\.[а-яіїєґ]{2,}){1,}$")
 
 
 LONG_PRACTICE_SUBJECT_RE = re.compile(
@@ -72,7 +73,7 @@ DROP_REVIEW_SERVICE_RE = re.compile(
     r"(?iu)^(?:день\s+самост[іi]йної\s+роботи|самост[іi]й[-\s/]*н\w*(?:\s*/\s*|\s+)робот\w*|вільний\s+день)$"
 )
 DROP_REVIEW_TECHNICAL_RE = re.compile(
-    r"(?iu)^(?:classroom\.?|google\s+classroom\.?|гугл\s+клас:?\.?|\[\d{2}\.\d{2}(?:,\s*\d{2}\.\d{2})*\]\.?|вкл\.?\s*\d{2}\.\d{2}\.?|(?:іd|id)\s*:\s*\d+(?:\s+\d+)+|понедельник|вторник|среда|четверг|пятница|суббота|воскресенье)$"
+    r"(?iu)^(?:classroom\.?|google\s+classroom\.?|гугл\s+клас:?\.?|\[\d{2}\.\d{2}(?:,\s*\d{2}\.\d{2})*\](?:\s*(?:\.|\((?:пр|л|лек|практ|сем|лаб|с|c)\))\s*)?|вкл\.?\s*\d{2}\.\d{2}\.?|(?:іd|id)\s*:\s*\d+(?:\s+\d+)+|понедельник|вторник|среда|четверг|пятница|суббота|воскресенье)$"
 )
 
 
@@ -337,6 +338,8 @@ def _looks_like_fragment_subject(subject: str) -> bool:
         return True
     if re.fullmatch(r"(?u)[А-ЯІЇЄҐA-Z]\.\s*[А-ЯІЇЄҐA-Z]\.?", stripped):
         return True
+    if LOWERCASE_DOTTED_VALID_SUBJECT_RE.fullmatch(stripped):
+        return False
     if stripped[0].islower():
         return True
     if any(token in stripped.casefold() for token in (".us", "?pwd=", "pwd=", "ідентифікатор", "идентификатор", "конференції", "конференции")):

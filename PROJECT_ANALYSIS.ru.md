@@ -244,9 +244,9 @@ python -m build
 - команда: `python -m timetable_scraper run-batched --config config/knu_web_schedule.yaml --batch-size 5`
 - результат:
   - `173` exported workbooks
-  - `42651` accepted rows
-  - `3993` review rows
-  - `46554` rows with autofixes
+  - `42715` accepted rows
+  - `3913` review rows
+  - `46538` rows with autofixes
   - `0` QA warnings
   - `0` QA failures
 
@@ -256,13 +256,14 @@ python -m build
 - в [C:/Coding projects/university_timetables/src/timetable_scraper/utils.py](C:/Coding%20projects/university_timetables/src/timetable_scraper/utils.py) усилен список forbidden/service subject placeholder-ов для `classroom`, `Google Classroom`, `Гугл клас`, `ID: ...`, одиночных bracket-date фрагментов и русских weekday labels;
 - в [C:/Coding projects/university_timetables/src/timetable_scraper/normalize.py](C:/Coding%20projects/university_timetables/src/timetable_scraper/normalize.py) такие технические куски больше уходят в `notes`, а не остаются в `subject`; отдельно добавлена безопасная нормализация валидной аббревиатуры `техн.комп.бачення`;
 - в [C:/Coding projects/university_timetables/src/timetable_scraper/normalize.py](C:/Coding%20projects/university_timetables/src/timetable_scraper/normalize.py) добавлен узкий merge для разрезанных `subject` в `sociology-schedule`, включая continuation через строку другой подгруппы и поглощение промежуточных дублей одного фрагмента;
-- в [C:/Coding projects/university_timetables/src/timetable_scraper/qa.py](C:/Coding%20projects/university_timetables/src/timetable_scraper/qa.py) review-очередь теперь жёстче выкидывает административные и чисто технические строки без реального учебного содержимого.
+- в [C:/Coding projects/university_timetables/src/timetable_scraper/qa.py](C:/Coding%20projects/university_timetables/src/timetable_scraper/qa.py) review-очередь теперь жёстче выкидывает административные и чисто технические строки без реального учебного содержимого;
+- в [C:/Coding projects/university_timetables/src/timetable_scraper/qa.py](C:/Coding%20projects/university_timetables/src/timetable_scraper/qa.py) добавлено safe-исключение для валидных lowercase dotted subject в `fit-schedule` и drop review для pure date-placeholder строк вида `[24.11] .` и `[03.11, 10.11] (Пр)`.
 
 Оставшиеся основные backlog-и после этого состояния:
 
 - `phys-schedule`: `979 review`
 - `sociology-schedule`: `725 review`
-- `fit-schedule`: `531 review`
+- `fit-schedule`: `451 review`
 - `biomed-schedule`: `440 review`
 
 Оставшиеся `tiny workbook`-и в полном baseline сейчас выглядят как спорные, но не явно ложные:

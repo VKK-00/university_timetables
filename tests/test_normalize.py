@@ -2507,6 +2507,75 @@ def test_sanitize_export_rows_drops_service_only_review_row() -> None:
     assert not review
 
 
+def test_partition_rows_keeps_valid_lowercase_dotted_fit_subject() -> None:
+    row = NormalizedRow(
+        program="ІПЗ, ІПЗм",
+        faculty="Факультет інформаційних технологій",
+        week_type="Обидва",
+        day="Понеділок",
+        start_time="16:40",
+        end_time="18:00",
+        subject="техн.комп.бачення",
+        teacher="Порєв Г. В.; Меркулова К. В.",
+        lesson_type="лабораторна; практична",
+        groups="підгрупа ІПЗм-22",
+        course="2",
+        confidence=0.99,
+        source_name="fit-schedule",
+        asset_locator="https://fit.knu.ua/schedule.xlsx",
+    )
+
+    accepted, review = partition_rows([row], threshold=0.74)
+
+    assert len(accepted) == 1
+    assert not review
+    assert "inconsistent_columns" not in accepted[0].qa_flags
+
+
+def test_sanitize_export_rows_drops_fit_bracket_date_placeholder_review_row() -> None:
+    row = NormalizedRow(
+        program="АнД, КН, ТШІ",
+        faculty="Факультет інформаційних технологій",
+        week_type="Обидва",
+        day="Понеділок",
+        start_time="13:40",
+        end_time="15:00",
+        subject="[24.11] .",
+        teacher="ас. Хроленко Я.О.",
+        groups="підгрупа 1",
+        course="3",
+        source_name="fit-schedule",
+        asset_locator="https://fit.knu.ua/schedule.xlsx",
+    )
+
+    accepted, review = sanitize_export_rows([], [row])
+
+    assert not accepted
+    assert not review
+
+
+def test_sanitize_export_rows_drops_fit_bracket_dates_with_lesson_marker_review_row() -> None:
+    row = NormalizedRow(
+        program="ІР, ВЕБ, ІРма",
+        faculty="Факультет інформаційних технологій",
+        week_type="Обидва",
+        day="Понеділок",
+        start_time="12:10",
+        end_time="13:30",
+        subject="[03.11, 10.11, 17.11, 24.11] (Пр)",
+        teacher="доц. Іваненко О.О.",
+        groups="підгрупа 1",
+        course="4",
+        source_name="fit-schedule",
+        asset_locator="https://fit.knu.ua/schedule.xlsx",
+    )
+
+    accepted, review = sanitize_export_rows([], [row])
+
+    assert not accepted
+    assert not review
+
+
 def test_normalize_document_merges_sociology_uppercase_tail_fragment() -> None:
     asset = DiscoveredAsset(
         source_name="sociology-schedule",
