@@ -695,18 +695,25 @@ def _merge_subject_continuation_rows(rows: list[NormalizedRow]) -> list[Normaliz
         if not _can_start_subject_continuation(row):
             survivors.append(row)
             continue
-        continuation = _find_subject_continuation_row(rows, index, consumed_ids)
-        if continuation is None:
+        merged_any = False
+        while True:
+            continuation, duplicate_rows = _find_subject_continuation_row(rows, index, consumed_ids)
+            if continuation is None:
+                break
+            row.subject = _merge_subject_fragments(row.subject, continuation.subject)
+            row.teacher = _merge_unique([row.teacher, continuation.teacher])
+            row.lesson_type = _normalize_lesson_type_field(_merge_unique([row.lesson_type, continuation.lesson_type]))
+            row.link = _merge_unique([row.link, continuation.link], separator=" ")
+            row.room = _merge_unique([row.room, continuation.room])
+            row.notes = _merge_unique([row.notes, continuation.notes])
+            row.autofix_actions = list(dict.fromkeys([*row.autofix_actions, "subject_continuation_merged"]))
+            consumed_ids.add(id(continuation))
+            for duplicate_row in duplicate_rows:
+                consumed_ids.add(id(duplicate_row))
+            merged_any = True
+        if not merged_any:
             survivors.append(row)
             continue
-        row.subject = _merge_subject_fragments(row.subject, continuation.subject)
-        row.teacher = _merge_unique([row.teacher, continuation.teacher])
-        row.lesson_type = _normalize_lesson_type_field(_merge_unique([row.lesson_type, continuation.lesson_type]))
-        row.link = _merge_unique([row.link, continuation.link], separator=" ")
-        row.room = _merge_unique([row.room, continuation.room])
-        row.notes = _merge_unique([row.notes, continuation.notes])
-        row.autofix_actions = list(dict.fromkeys([*row.autofix_actions, "subject_continuation_merged"]))
-        consumed_ids.add(id(continuation))
         survivors.append(row)
     return survivors
 
@@ -715,7 +722,7 @@ def _can_start_subject_continuation(row: NormalizedRow) -> bool:
     subject = row.subject.strip()
     if not subject:
         return False
-    if any(value.strip() for value in (row.teacher, row.lesson_type, row.link, row.room)):
+    if row.source_name != "sociology-schedule" and any(value.strip() for value in (row.teacher, row.lesson_type, row.link, row.room)):
         return False
     if subject[0].islower():
         return False
@@ -726,29 +733,93 @@ def _find_subject_continuation_row(
     rows: list[NormalizedRow],
     index: int,
     consumed_ids: set[int],
-) -> NormalizedRow | None:
+) -> tuple[NormalizedRow | None, list[NormalizedRow]]:
     current = rows[index]
-    if index + 1 >= len(rows):
-        return None
-    candidate = rows[index + 1]
-    if id(candidate) in consumed_ids:
-        return None
-    subject = candidate.subject.strip()
-    if not subject or not subject[0].islower():
-        return None
+    duplicate_rows: list[NormalizedRow] = []
+    for offset in range(1, 5):
+        candidate_index = index + offset
+        if candidate_index >= len(rows):
+            break
+        candidate = rows[candidate_index]
+        if id(candidate) in consumed_ids:
+            continue
+        if not _is_same_subject_slot(current, candidate):
+            break
+        if _looks_like_duplicate_subject_row(current, candidate):
+            duplicate_rows.append(candidate)
+            continue
+        if not _has_subject_continuation_metadata(current, candidate):
+            continue
+        if not _looks_like_subject_continuation(current, candidate):
+            continue
+        return candidate, duplicate_rows
+    return None, []
+
+
+def _is_same_subject_slot(current: NormalizedRow, candidate: NormalizedRow) -> bool:
     if candidate.source_name != current.source_name:
-        return None
+        return False
     if candidate.sheet_name != current.sheet_name:
-        return None
+        return False
     if candidate.day != current.day or candidate.start_time != current.start_time or candidate.end_time != current.end_time:
-        return None
+        return False
+    return True
+
+
+def _has_subject_continuation_metadata(current: NormalizedRow, candidate: NormalizedRow) -> bool:
+    if any(
+        _slot_context_matches(left, right) and left.strip() and right.strip()
+        for left, right in (
+            (current.teacher, candidate.teacher),
+            (current.room, candidate.room),
+            (current.lesson_type, candidate.lesson_type),
+            (current.link, candidate.link),
+        )
+    ):
+        return True
+    return any(value.strip() for value in (candidate.teacher, candidate.lesson_type, candidate.link, candidate.room))
+
+
+def _looks_like_duplicate_subject_row(current: NormalizedRow, candidate: NormalizedRow) -> bool:
+    if current.source_name != "sociology-schedule":
+        return False
     if not _slot_context_matches(current.course, candidate.course):
-        return None
+        return False
     if not _slot_context_matches(current.groups, candidate.groups):
-        return None
-    if not any(value.strip() for value in (candidate.teacher, candidate.lesson_type, candidate.link, candidate.room)):
-        return None
-    return candidate
+        return False
+    return _normalize_subject_key(current.subject) == _normalize_subject_key(candidate.subject)
+
+
+def _looks_like_subject_continuation(current: NormalizedRow, candidate: NormalizedRow) -> bool:
+    if not _slot_context_matches(current.course, candidate.course):
+        return False
+    if not _slot_context_matches(current.groups, candidate.groups):
+        return False
+    subject = candidate.subject.strip()
+    if not subject:
+        return False
+    if _normalize_subject_key(current.subject) == _normalize_subject_key(subject):
+        return False
+    if subject[0].islower():
+        return True
+    return current.source_name == "sociology-schedule" and _looks_like_sociology_subject_tail(subject)
+
+
+def _looks_like_sociology_subject_tail(subject: str) -> bool:
+    cleaned = normalize_service_tokens(subject)
+    if not cleaned or any(character.islower() for character in cleaned):
+        return False
+    return bool(
+        re.match(
+            r"(?u)^(?:В|І|Й|ТА|СОЦІОЛОГІЇ|ДОСЛІДЖЕННЯ|КОМУНІКАЦІЙ|КУЛЬТУРИ|КУЛЬТУРНИХ|МАРКЕТИНГУ|"
+            r"ПУБЛІЧНОГО|УПРАВЛІНСЬКИХ|СОЦІАЛЬНИХ|ПРАЦІ|ДАНИХ|СОЦІОЛОГІЧНИХ)\b",
+            cleaned,
+        )
+    )
+
+
+def _normalize_subject_key(value: str) -> str:
+    return re.sub(r"[\W_]+", "", normalize_service_tokens(value).casefold(), flags=re.UNICODE)
 
 
 def _merge_subject_fragments(left: str, right: str) -> str:

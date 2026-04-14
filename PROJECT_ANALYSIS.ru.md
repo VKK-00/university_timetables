@@ -76,6 +76,7 @@
   - перевод сырых `RawRecord` в `NormalizedRow`;
   - cleanup `subject/teacher/room/groups/notes`;
   - merge metadata-only rows и subject continuation rows;
+  - узкий source-specific merge для `sociology-schedule`, когда название предмета разрезано на несколько строк одного слота;
   - program label recovery и week inference.
 - [C:/Coding projects/university_timetables/src/timetable_scraper/utils.py](C:/Coding%20projects/university_timetables/src/timetable_scraper/utils.py)
   - общие regex/эвристики;
@@ -104,6 +105,7 @@
 3. `fetch.py` скачивает assets с retry и определяет тип.
 4. `adapters/*.py` парсят каждый asset в `ParsedDocument`.
 5. `normalize.py` превращает сырые записи в `NormalizedRow`.
+   Для `sociology-schedule` тут же выполняется узкое склеивание разрезанных `subject`, если continuation лежит в соседней строке того же слота или через одну строку другой подгруппы.
 6. `qa.py` делит строки на `accepted` и `review`, а также режет ложные tiny bucket-ы.
 7. `export.py` пишет Excel-книги, manifest и review queue.
 8. `reporting.py` и `qa.py` строят post-run артефакты:
@@ -210,6 +212,9 @@ python -m build
 4. **Manual asset seeding допустим только для официальных прямых файлов.**
    Это способ обходить страницы, которые блокируют discovery, но не повод подмешивать неофициальные данные.
 
+5. **Source-specific merge разрешён только там, где паттерн подтверждён review-данными.**
+   Сейчас это касается `sociology-schedule`: там встречаются разрезанные uppercase-фрагменты одного предмета в рамках одного слота. Аналогичный merge не включён глобально для всех source-ов, чтобы не склеивать разные дисциплины по ошибке.
+
 ## Какие варианты рассматривались и почему выбрано текущее решение
 
 - **Полностью ослабить QA**, чтобы увеличить `accepted`.
@@ -229,18 +234,19 @@ python -m build
 - некоторые официальные источники остаются `confirmed-blocker` из-за внешних ограничений сайта;
 - часть backlog ещё остаётся в `phys`, `sociology`, `fit` и других источниках;
 - tiny workbook-и ещё существуют, хотя большая часть ложных bucket-ов уже вычищена;
+- `sociology-schedule` теперь лучше склеивает разрезанные названия предметов, но эта логика специально узкая и не должна автоматически распространяться на все факультеты;
 - полный baseline меняется по сети, поэтому результаты надо подтверждать именно свежим `run-batched`.
 
-## Актуальное состояние на 2026-04-13
+## Актуальное состояние на 2026-04-14
 
 Последний подтверждённый полный запуск:
 
 - команда: `python -m timetable_scraper run-batched --config config/knu_web_schedule.yaml --batch-size 5`
 - результат:
-  - `172` exported workbooks
-  - `42899` accepted rows
-  - `4185` review rows
-  - `46994` rows with autofixes
+  - `173` exported workbooks
+  - `42651` accepted rows
+  - `3993` review rows
+  - `46554` rows with autofixes
   - `0` QA warnings
   - `0` QA failures
 
@@ -249,12 +255,13 @@ python -m build
 - добавлен обязательный файл [C:/Coding projects/university_timetables/PROJECT_ANALYSIS.ru.md](C:/Coding%20projects/university_timetables/PROJECT_ANALYSIS.ru.md);
 - в [C:/Coding projects/university_timetables/src/timetable_scraper/utils.py](C:/Coding%20projects/university_timetables/src/timetable_scraper/utils.py) усилен список forbidden/service subject placeholder-ов для `classroom`, `Google Classroom`, `Гугл клас`, `ID: ...`, одиночных bracket-date фрагментов и русских weekday labels;
 - в [C:/Coding projects/university_timetables/src/timetable_scraper/normalize.py](C:/Coding%20projects/university_timetables/src/timetable_scraper/normalize.py) такие технические куски больше уходят в `notes`, а не остаются в `subject`; отдельно добавлена безопасная нормализация валидной аббревиатуры `техн.комп.бачення`;
+- в [C:/Coding projects/university_timetables/src/timetable_scraper/normalize.py](C:/Coding%20projects/university_timetables/src/timetable_scraper/normalize.py) добавлен узкий merge для разрезанных `subject` в `sociology-schedule`, включая continuation через строку другой подгруппы и поглощение промежуточных дублей одного фрагмента;
 - в [C:/Coding projects/university_timetables/src/timetable_scraper/qa.py](C:/Coding%20projects/university_timetables/src/timetable_scraper/qa.py) review-очередь теперь жёстче выкидывает административные и чисто технические строки без реального учебного содержимого.
 
 Оставшиеся основные backlog-и после этого состояния:
 
-- `phys-schedule`: `990 review`
-- `sociology-schedule`: `854 review`
+- `phys-schedule`: `979 review`
+- `sociology-schedule`: `725 review`
 - `fit-schedule`: `531 review`
 - `biomed-schedule`: `440 review`
 

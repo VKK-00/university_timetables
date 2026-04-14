@@ -2507,6 +2507,226 @@ def test_sanitize_export_rows_drops_service_only_review_row() -> None:
     assert not review
 
 
+def test_normalize_document_merges_sociology_uppercase_tail_fragment() -> None:
+    asset = DiscoveredAsset(
+        source_name="sociology-schedule",
+        source_kind="web_page",
+        source_url_or_path="https://sociology.knu.ua/uk/students",
+        asset_kind="file_url",
+        locator="https://docs.google.com/spreadsheets/d/demo/edit?usp=sharing",
+        display_name="schedule.xlsx",
+    )
+    fetched = FetchedAsset(asset=asset, content=b"", content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", content_hash="abc", resolved_locator="schedule.xlsx")
+    document = ParsedDocument(
+        asset=fetched,
+        sheets=[
+            ParsedSheet(
+                sheet_name="2 mag 2c 25-26",
+                program="2 mag 2c 25-26",
+                faculty="Факультет соціології",
+                records=[
+                    RawRecord(
+                        values={
+                            "program": "2 mag 2c 25-26",
+                            "faculty": "Факультет соціології",
+                            "day": "П'ятниця",
+                            "start_time": "17:10",
+                            "end_time": "18:30",
+                            "subject": "МЕТОДИ АНАЛІЗУ НЕЧИСЛОВИХ ДАНИХ",
+                            "teacher": "проф. САВЕЛЬЄВ Ю.Б.",
+                            "room": "ауд. 501",
+                            "course": "2",
+                        },
+                        row_index=2,
+                        sheet_name="2 mag 2c 25-26",
+                        raw_excerpt="МЕТОДИ АНАЛІЗУ НЕЧИСЛОВИХ ДАНИХ",
+                    ),
+                    RawRecord(
+                        values={
+                            "program": "2 mag 2c 25-26",
+                            "faculty": "Факультет соціології",
+                            "day": "П'ятниця",
+                            "start_time": "17:10",
+                            "end_time": "18:30",
+                            "subject": "В СОЦІОЛОГІЇ",
+                            "teacher": "проф. САВЕЛЬЄВ Ю.Б.",
+                            "lesson_type": "практична",
+                            "room": "ауд. 501; ауд.504",
+                            "course": "2",
+                        },
+                        row_index=3,
+                        sheet_name="2 mag 2c 25-26",
+                        raw_excerpt="В СОЦІОЛОГІЇ",
+                    ),
+                ],
+            )
+        ],
+    )
+
+    rows = normalize_document(document)
+
+    assert len(rows) == 1
+    assert rows[0].subject == "МЕТОДИ АНАЛІЗУ НЕЧИСЛОВИХ ДАНИХ В СОЦІОЛОГІЇ"
+    assert rows[0].lesson_type == "практична"
+    assert "subject_continuation_merged" in rows[0].autofix_actions
+
+
+def test_normalize_document_merges_sociology_tail_fragment_across_other_group_row() -> None:
+    asset = DiscoveredAsset(
+        source_name="sociology-schedule",
+        source_kind="web_page",
+        source_url_or_path="https://sociology.knu.ua/uk/students",
+        asset_kind="file_url",
+        locator="https://docs.google.com/spreadsheets/d/demo/edit?usp=sharing",
+        display_name="schedule.xlsx",
+    )
+    fetched = FetchedAsset(asset=asset, content=b"", content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", content_hash="abc", resolved_locator="schedule.xlsx")
+    document = ParsedDocument(
+        asset=fetched,
+        sheets=[
+            ParsedSheet(
+                sheet_name="1курс 1с 24-25",
+                program="1курс 1с 24-25",
+                faculty="Факультет соціології",
+                records=[
+                    RawRecord(
+                        values={
+                            "program": "1курс 1с 24-25",
+                            "faculty": "Факультет соціології",
+                            "day": "Понеділок",
+                            "start_time": "12:30",
+                            "end_time": "13:50",
+                            "subject": "ІНФОРМАЦІЙНІ ТЕХНОЛОГІЇ",
+                            "room": "ауд. 505",
+                            "groups": "1 група",
+                        },
+                        row_index=2,
+                        sheet_name="1курс 1с 24-25",
+                        raw_excerpt="ІНФОРМАЦІЙНІ ТЕХНОЛОГІЇ",
+                    ),
+                    RawRecord(
+                        values={
+                            "program": "1курс 1с 24-25",
+                            "faculty": "Факультет соціології",
+                            "day": "Понеділок",
+                            "start_time": "12:30",
+                            "end_time": "13:50",
+                            "subject": "СОЦІАЛЬНА АНТРОПОЛОГІЯ:",
+                            "teacher": "ас. ДЕЙНЕКА А.В.",
+                            "groups": "2 група",
+                            "notes": "СОЦІОЛОГІЧНІ ЗАСАДИ (C)",
+                        },
+                        row_index=3,
+                        sheet_name="1курс 1с 24-25",
+                        raw_excerpt="СОЦІАЛЬНА АНТРОПОЛОГІЯ:",
+                    ),
+                    RawRecord(
+                        values={
+                            "program": "1курс 1с 24-25",
+                            "faculty": "Факультет соціології",
+                            "day": "Понеділок",
+                            "start_time": "12:30",
+                            "end_time": "13:50",
+                            "subject": "В СОЦІОЛОГІЇ",
+                            "lesson_type": "практика",
+                            "room": "ауд. 505",
+                            "groups": "1 група",
+                        },
+                        row_index=4,
+                        sheet_name="1курс 1с 24-25",
+                        raw_excerpt="В СОЦІОЛОГІЇ",
+                    ),
+                ],
+            )
+        ],
+    )
+
+    rows = normalize_document(document)
+
+    assert len(rows) == 2
+    merged_row = next(row for row in rows if row.groups == "1 група")
+    untouched_row = next(row for row in rows if row.groups == "2 група")
+    assert merged_row.subject == "ІНФОРМАЦІЙНІ ТЕХНОЛОГІЇ В СОЦІОЛОГІЇ"
+    assert merged_row.lesson_type == "практика"
+    assert untouched_row.subject == "СОЦІАЛЬНА АНТРОПОЛОГІЯ:"
+
+
+def test_normalize_document_skips_duplicate_sociology_fragment_before_tail_merge() -> None:
+    asset = DiscoveredAsset(
+        source_name="sociology-schedule",
+        source_kind="web_page",
+        source_url_or_path="https://sociology.knu.ua/uk/students",
+        asset_kind="file_url",
+        locator="https://docs.google.com/spreadsheets/d/demo/edit?usp=sharing",
+        display_name="schedule.xlsx",
+    )
+    fetched = FetchedAsset(asset=asset, content=b"", content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", content_hash="abc", resolved_locator="schedule.xlsx")
+    document = ParsedDocument(
+        asset=fetched,
+        sheets=[
+            ParsedSheet(
+                sheet_name="3к 1с 25-26",
+                program="3к 1с 25-26",
+                faculty="Факультет соціології",
+                records=[
+                    RawRecord(
+                        values={
+                            "program": "3к 1с 25-26",
+                            "faculty": "Факультет соціології",
+                            "day": "Четвер",
+                            "start_time": "12:30",
+                            "end_time": "13:50",
+                            "subject": "ОРГАНІЗАЦІЯ ТА МЕТОДИ ВИБІРКОВОГО",
+                            "room": "ауд. 505",
+                            "groups": "2 група; 1.2 підгрупа (10 осіб); 1 група",
+                        },
+                        row_index=2,
+                        sheet_name="3к 1с 25-26",
+                        raw_excerpt="ОРГАНІЗАЦІЯ ТА МЕТОДИ ВИБІРКОВОГО",
+                    ),
+                    RawRecord(
+                        values={
+                            "program": "3к 1с 25-26",
+                            "faculty": "Факультет соціології",
+                            "day": "Четвер",
+                            "start_time": "12:30",
+                            "end_time": "13:50",
+                            "subject": "ОРГАНІЗАЦІЯ ТА МЕТОДИ ВИБІРКОВОГО",
+                            "room": "ауд. ДОС-НЯ В СОЦ-ГІЇ ( ) ауд.505",
+                            "groups": "2 група; 1.2 підгрупа (10 осіб); 1 група",
+                        },
+                        row_index=3,
+                        sheet_name="3к 1с 25-26",
+                        raw_excerpt="ОРГАНІЗАЦІЯ ТА МЕТОДИ ВИБІРКОВОГО",
+                    ),
+                    RawRecord(
+                        values={
+                            "program": "3к 1с 25-26",
+                            "faculty": "Факультет соціології",
+                            "day": "Четвер",
+                            "start_time": "12:30",
+                            "end_time": "13:50",
+                            "subject": "ДОСЛІДЖЕННЯ В СОЦІОЛОГІЇ",
+                            "lesson_type": "практика",
+                            "room": "ауд. 505",
+                            "groups": "2 група; 1.2 підгрупа (10 осіб); 1 група",
+                        },
+                        row_index=4,
+                        sheet_name="3к 1с 25-26",
+                        raw_excerpt="ДОСЛІДЖЕННЯ В СОЦІОЛОГІЇ",
+                    ),
+                ],
+            )
+        ],
+    )
+
+    rows = normalize_document(document)
+
+    assert len(rows) == 1
+    assert rows[0].subject == "ОРГАНІЗАЦІЯ ТА МЕТОДИ ВИБІРКОВОГО ДОСЛІДЖЕННЯ В СОЦІОЛОГІЇ"
+    assert rows[0].lesson_type == "практика"
+
+
 def test_sanitize_export_rows_drops_free_day_review_row() -> None:
     row = NormalizedRow(
         program="",
