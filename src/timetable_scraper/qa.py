@@ -75,6 +75,11 @@ DROP_REVIEW_SERVICE_RE = re.compile(
 DROP_REVIEW_TECHNICAL_RE = re.compile(
     r"(?iu)^(?:classroom\.?|google\s+classroom\.?|гугл\s+клас:?\.?|\[\d{2}\.\d{2}(?:,\s*\d{2}\.\d{2})*\](?:\s*(?:\.|\((?:пр|л|лек|практ|сем|лаб|с|c)\))\s*)?|вкл\.?\s*\d{2}\.\d{2}\.?|(?:іd|id)\s*:\s*\d+(?:\s+\d+)+|понедельник|вторник|среда|четверг|пятница|суббота|воскресенье)$"
 )
+DATE_LIST_TOKEN = r"\[\d{2}\.\d{2}(?:\s*,\s*\d{2}\.\d{2})*\s*\]"
+DROP_REVIEW_DATE_LIST_ONLY_RE = re.compile(rf"(?iu)^{DATE_LIST_TOKEN}(?:\s*;\s*{DATE_LIST_TOKEN})*$")
+DROP_REVIEW_DATE_PLACEHOLDER_RE = re.compile(
+    rf"(?iu)^{DATE_LIST_TOKEN}(?:\s*(?:\.|\((?:пр|л|лек|практ|сем|лаб|с|c)\)))*$"
+)
 
 
 def partition_rows(rows: list[NormalizedRow], threshold: float) -> tuple[list[NormalizedRow], list[NormalizedRow]]:
@@ -356,6 +361,7 @@ def _looks_like_fragment_subject(subject: str) -> bool:
 def _resolve_program_label(row: NormalizedRow) -> str:
     return coalesce_program_label(
         row.program,
+        _extract_phys_program_from_groups(row),
         row.groups,
         infer_asset_label_from_locator(row.asset_locator),
         row.sheet_name,
@@ -373,6 +379,30 @@ def _course_as_program_label(course: str) -> str:
     if re.fullmatch(r"(?iu)\d{1,2}\s*курс", cleaned):
         return cleaned
     return ""
+
+
+def _extract_phys_program_from_groups(row: NormalizedRow) -> str:
+    if row.source_name.casefold() != "phys-schedule":
+        return ""
+    groups = normalize_service_tokens(row.groups)
+    if not groups:
+        return ""
+    if any(marker in groups for marker in (";", "(", ")")):
+        return ""
+    parts = groups.split()
+    if not parts or parts[0].casefold() != "група":
+        return ""
+    tail = parts[1:]
+    if tail and tail[0].isdigit():
+        tail = tail[1:]
+    label = normalize_service_tokens(" ".join(tail)).strip(" .,:;-")
+    if not label:
+        return ""
+    if len(label) < 4:
+        return ""
+    if looks_like_bad_program_label(label):
+        return ""
+    return label
 
 
 def _program_hint_from_notes(notes: str) -> str:
@@ -671,6 +701,10 @@ def _looks_like_drop_review_text(value: str) -> bool:
     if DROP_REVIEW_SERVICE_RE.fullmatch(cleaned):
         return True
     if DROP_REVIEW_TECHNICAL_RE.fullmatch(cleaned):
+        return True
+    if DROP_REVIEW_DATE_LIST_ONLY_RE.fullmatch(cleaned):
+        return True
+    if DROP_REVIEW_DATE_PLACEHOLDER_RE.fullmatch(cleaned):
         return True
     if looks_like_admin_text(cleaned):
         return True

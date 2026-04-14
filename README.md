@@ -27,12 +27,12 @@
 
 ## Current KNU Coverage / Поточне покриття КНУ
 
-Latest full KNU web run source of truth: April 13, 2026
+Latest full KNU web run source of truth: April 14, 2026
 
-- `172` exported workbooks
-- `42715` accepted rows
-- `3913` review rows
-- `46538` rows with autofixes
+- `169` exported workbooks
+- `43110` accepted rows
+- `3435` review rows
+- `46455` rows with autofixes
 - `0` QA warnings
 - `0` QA failures
 
@@ -44,8 +44,8 @@ Current source statuses:
 
 Largest parsed sources in the current run:
 
-- `FIT: 30053 accepted, 451 review`
-- `Physics: 4878 accepted, 979 review`
+- `FIT: 30045 accepted, 376 review`
+- `Physics: 5281 accepted, 576 review`
 - `Sociology: 2527 accepted, 725 review`
 
 Detailed coverage and source-level status are documented in:

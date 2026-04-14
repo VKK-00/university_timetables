@@ -153,7 +153,7 @@ BAD_PROGRAM_LABEL_PATTERNS = (
     re.compile(r"(?iu)^\d+\s*магістр\w*.*$"),
     re.compile(r"(?iu)^\d+\s*бакалавр\w*.*$"),
     re.compile(r"(?iu)^\d{4}\s+\d{4}\s+\d+\s*sem\b.*$"),
-    re.compile(r"(?iu)^\d+\s*sem\.\b.*$"),
+    re.compile(r"(?iu)^\d+\s*sem\.?(?:\s+\d.*)?$"),
     re.compile(r"(?iu)^(?:\d+\s+){1,3}[A-Za-z0-9+/=_-]{6,}$"),
     re.compile(r"(?iu)^начитка!?$"),
     re.compile(r"(?iu)^настановча(?:\s+сесія)?(?:\s+\d.*)?$"),
