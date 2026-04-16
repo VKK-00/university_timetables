@@ -52,6 +52,16 @@ Largest parsed sources in the current run:
 
 Current tiny workbook count in `out_knu_web/qa_report.json`: `4`
 
+Latest focused refresh for changed sources, written to ignored `out_knu_web_focus/` on April 16, 2026:
+
+- `chem-schedule: 443 accepted, 40 review`, workbook QA issues `0`
+- `fit-schedule: 30128 accepted, 576 review`, workbook QA issues `0`
+- `biomed-schedule: 618 accepted, 503 review`, workbook QA issues `0`
+- focused output bad filenames: `0`
+- focused output forbidden accepted subjects: `0`
+
+The full `out_knu_web/` baseline was not overwritten by this focused refresh. A full `run-batched` attempt after these changes hit the local command timeout before final export, so the full baseline above remains the last completed full run.
+
 Detailed coverage and source-level status are documented in:
 
 - [`out_knu_web/source_summary.md`](./out_knu_web/source_summary.md)
@@ -230,12 +240,14 @@ Additional guarantees in the current pipeline:
 - Excel numeric artifacts like `1.0`, `2.0`, `307.0` are normalized in `groups`, `course`, and `room`
 - bad user-facing program labels such as `3 к 1с`, `1к 1с 25-26`, `2с 25-26`, `1 рік навчання`, `1 2 курс`, `English 1c`, `Аркуш8`, `uploads`, `Завантажити`, `Nachytka`, malformed law transliteration labels, teacher-like names, chemistry group-grid labels, unmatched quotes, and date-prefixed FIT labels such as `01.09-05.09 АнД, КН, ТШІ` are blocked from workbook and sheet names
 - source-specific fallback programs are used only for confirmed sources: `sociology-schedule -> Соціологія`, `journ-schedule -> Журналістика`, `geology-schedule -> Геологія`, `law-schedule -> Право`, `philosophy-schedule -> Філософія`
+- `chem-schedule` uses the conservative fallback `Хімія` when the source provides only technical schedule titles such as `РОЗКЛАД з 2 березня`
 - labels such as `Психологія 1 курс "Магістр"` are split into clean `program=Психологія` and normalized `course=1 курс магістр`
-- Biomed labels drop service fragments such as `ДОСТАВИТИ`, `(укр)`, `ОП`, and `ОС`; semester-week service rows such as `І семестр тижнів: 13` do not become accepted subjects
+- Biomed labels drop service fragments such as `ДОСТАВИТИ`, `(укр)`, `ОП`, and `ОС`; long titles containing `Освітня програма "..."` recover the quoted program label, and semester-week service rows such as `І семестр тижнів: 13` do not become accepted subjects
 - `autofix_actions` is preserved in normalized data, `manifest.jsonl`, and `review_queue.xlsx`
 - orphan metadata-only rows are dropped when they cannot be merged back into a unique timetable slot safely
 - `sociology-schedule` has a narrow continuation merge for split uppercase or bilingual subjects inside one slot; hour-tail fragments are moved out of `subject`, and room payloads like `ауд. проф. ... ауд.312` are split into `teacher + room`
 - FIT grid parsing now does parser-level cleanup for merged subject cells: exact two-subject date-boundary split, inline date-list extraction into `notes`, inline room extraction into `room`, and trailing teacher extraction into `teacher`
+- FIT `Іноземна мова` rows may keep long semicolon-separated teacher lists when the row is otherwise structurally valid; teacher-only rows without a subject still remain in review
 - leading clock-time prefixes inside subject cells, for example `14:10 Організація...`, are moved to `notes` instead of staying in `subject`
 - `run` cleans the target output directory before writing a new result set
 - post-run QA checks every exported workbook automatically

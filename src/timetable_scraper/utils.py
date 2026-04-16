@@ -161,6 +161,7 @@ BAD_PROGRAM_LABEL_PATTERNS = (
     re.compile(r"(?iu)^rozklad\b.*$"),
     re.compile(r"(?iu)^schedule(?:\s+of\s+classes)?$"),
     re.compile(r"(?iu)^schedule\s+of\s+classes\b.*$"),
+    re.compile(r"(?iu)^[a-z]+(?:[-_\s]+[a-z]+)*[-_\s]+schedule$"),
     re.compile(r"(?iu)^timetable\b.*$"),
     re.compile(r"(?iu)^uploads$"),
     re.compile(r"(?iu)^upload$"),
@@ -655,6 +656,18 @@ def normalize_program_candidate(value: Any) -> str:
             "iv": "Інтелектуальна власність",
             "zdnu": "ЗДНУ",
         }[law_match.group("code").casefold()]
+    education_program_match = re.search(
+        r"(?iu)\bосвітн(?:я|і)\s+програм(?:а|и)\s+\"(?P<label>[^\"]{3,120})\"?",
+        text,
+    )
+    if education_program_match:
+        return normalize_program_candidate(education_program_match.group("label"))
+    education_program_unquoted_match = re.search(
+        r"(?iu)\bосвітн(?:я|і)\s+програм(?:а|и)\s+(?P<label>[^,;]{3,120}?)\s+\bОС\b",
+        text,
+    )
+    if education_program_unquoted_match:
+        return normalize_program_candidate(education_program_unquoted_match.group("label"))
     course_parenthesized_match = re.fullmatch(
         r"(?iu)\d+\s*[-–— ]\s*\d+\s*курси?\s*\((?P<label>[^)]+)\)",
         text,

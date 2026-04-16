@@ -149,6 +149,12 @@ def test_normalize_program_candidate_applies_safe_aliases() -> None:
     assert normalize_program_candidate("Медицина(укр) ДОСТАВИТИ") == "Медицина"
     assert normalize_program_candidate("Медицина(укр) магістр") == "Медицина"
     assert normalize_program_candidate('Планування та озеленення" ОС "Бакалавр"') == "Планування та озеленення"
+    assert (
+        normalize_program_candidate(
+            'Розклад занять на другий семестр 2025-2026 навчального року Освітня програма "Біологія" ОС "Магістр"'
+        )
+        == "Біологія"
+    )
     assert normalize_program_candidate("планування та озеленення") == "Планування та озеленення"
     assert normalize_program_candidate('ОП "Медицина", ОП "Лабораторна діагностика", ОС "Бакалавр", ОС "Магістр"') == "Медицина, Лабораторна діагностика"
 

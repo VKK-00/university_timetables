@@ -157,7 +157,7 @@ def analyze_row_quality(row: NormalizedRow) -> NormalizedRow:
         flags.append("service_text_subject")
     if subject and len(subject) > 140:
         flags.append("subject_too_long")
-    if row.teacher and len(row.teacher) > 180:
+    if row.teacher and len(row.teacher) > 180 and not _allows_fit_parallel_foreign_language_teachers(row):
         flags.append("teacher_too_long")
     if row.teacher and (LESSON_TEXT_RE.search(row.teacher) or re.search(r"\b\d{3,4}\b", row.teacher) or re.search(r"\b\d{1,2}[.:]\d{2}\b", row.teacher)):
         flags.append("inconsistent_columns")
@@ -181,7 +181,11 @@ def analyze_row_quality(row: NormalizedRow) -> NormalizedRow:
         flags.append("inconsistent_columns")
     if subject and ("-----" in subject or "––––" in subject or "лек....." in subject or "практ....." in subject):
         flags.append("inconsistent_columns")
-    if row.teacher and ("лек" in row.teacher.casefold() or "практ" in row.teacher.casefold() or row.teacher.count(";") >= 5):
+    if row.teacher and (
+        "лек" in row.teacher.casefold()
+        or "практ" in row.teacher.casefold()
+        or (row.teacher.count(";") >= 5 and not _allows_fit_parallel_foreign_language_teachers(row))
+    ):
         flags.append("inconsistent_columns")
     if row.notes and len(row.notes) > 240:
         flags.append("inconsistent_columns")
@@ -372,12 +376,31 @@ def _resolve_program_label(row: NormalizedRow) -> str:
 
 def _source_program_fallback(source_name: str) -> str:
     return {
+        "chem-schedule": "Хімія",
         "geology-schedule": "Геологія",
         "journ-schedule": "Журналістика",
         "law-schedule": "Право",
         "philosophy-schedule": "Філософія",
         "sociology-schedule": "Соціологія",
     }.get(source_name.casefold(), "")
+
+
+def _allows_fit_parallel_foreign_language_teachers(row: NormalizedRow) -> bool:
+    if row.source_name.casefold() != "fit-schedule":
+        return False
+    subject = normalize_service_tokens(row.subject).casefold()
+    if subject not in {"іноземна мова", "англійська мова"}:
+        return False
+    teacher = normalize_service_tokens(row.teacher)
+    if teacher.count(";") < 3:
+        return False
+    if contains_link_text(teacher):
+        return False
+    if re.search(r"\b\d{3,4}\b", teacher) or re.search(r"\b\d{1,2}[.:]\d{2}\b", teacher):
+        return False
+    if LESSON_TEXT_RE.search(teacher):
+        return False
+    return True
 
 
 def _course_as_program_label(course: str) -> str:

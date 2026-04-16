@@ -985,6 +985,7 @@ def _normalize_program_label(value: str) -> str:
 
 def _source_program_fallback(source_name: str) -> str:
     return {
+        "chem-schedule": "Хімія",
         "geology-schedule": "Геологія",
         "journ-schedule": "Журналістика",
         "law-schedule": "Право",

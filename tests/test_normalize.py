@@ -3637,6 +3637,59 @@ def test_sanitize_export_rows_demotes_chem_group_grid_program_label() -> None:
     assert "bad_program_label" in review[0].qa_flags
 
 
+def test_normalize_record_uses_chem_source_fallback_for_schedule_title() -> None:
+    row = normalize_record(
+        RawRecord(
+            values={
+                "program": "РОЗКЛАД з 2 березня",
+                "faculty": "Хімічний факультет",
+                "day": "Понеділок",
+                "start_time": "09:50",
+                "end_time": "11:20",
+                "subject": "Фізична хімія",
+                "course": "2",
+                "groups": "1 група",
+            },
+            row_index=4,
+            sheet_name="РОЗКЛАД з 2 березня",
+            raw_excerpt="РОЗКЛАД з 2 березня | Понеділок | Фізична хімія",
+        ),
+        document=_document_for_source("chem-schedule"),
+    )
+
+    assert row.program == "Хімія"
+    accepted, review = partition_rows([row], threshold=0.74)
+
+    assert accepted
+    assert not review
+
+
+def test_partition_rows_keeps_fit_foreign_language_parallel_teacher_list() -> None:
+    row = NormalizedRow(
+        program="КБ, КБм",
+        faculty="Факультет інформаційних технологій",
+        source_name="fit-schedule",
+        week_type="Обидва",
+        day="Четвер",
+        start_time="13:40",
+        end_time="15:00",
+        subject="Іноземна мова",
+        teacher=(
+            "Борисенко П. А.; Безпаленко А.М.; Стрижньова М.Ю.; Козуб Л.С.; "
+            "Радчук В. Д.; Степаненко О.І.; Тарнавська Т.В."
+        ),
+        groups="підгрупа КБ-11; підгрупа КБ-12; підгрупа КБ-13; підгрупа КБ-14",
+        course="1",
+    )
+
+    accepted, review = partition_rows([row], threshold=0.74)
+
+    assert accepted
+    assert not review
+    assert "inconsistent_columns" not in accepted[0].qa_flags
+    assert "teacher_too_long" not in accepted[0].qa_flags
+
+
 def test_normalize_record_recovers_journ_source_program_and_strips_subject_time() -> None:
     asset = DiscoveredAsset(
         source_name="journ-schedule",

@@ -299,6 +299,9 @@ python -m build
 - в [C:/Coding projects/university_timetables/src/timetable_scraper/normalize.py](C:/Coding%20projects/university_timetables/src/timetable_scraper/normalize.py) добавлен перенос leading time из `subject` в `notes`, например `14:10 Організація...` больше не остаётся названием предмета;
 - в [C:/Coding projects/university_timetables/src/timetable_scraper/normalize.py](C:/Coding%20projects/university_timetables/src/timetable_scraper/normalize.py) добавлены строгие source fallback-и `journ-schedule -> Журналістика`, `geology-schedule -> Геологія`, `law-schedule -> Право`, `philosophy-schedule -> Філософія`, а `sociology-schedule -> Соціологія` сохранён как подтверждённый fallback;
 - в [C:/Coding projects/university_timetables/src/timetable_scraper/normalize.py](C:/Coding%20projects/university_timetables/src/timetable_scraper/normalize.py) service-subject строки вида `І семестр тижнів: 13` уходят из `accepted`, чтобы служебный календарный текст не становился предметом.
+- в [C:/Coding projects/university_timetables/src/timetable_scraper/normalize.py](C:/Coding%20projects/university_timetables/src/timetable_scraper/normalize.py) добавлен консервативный fallback `chem-schedule -> Хімія`, потому что текущий химфак source даёт один официальный файл с техническими sheet/program заголовками `РОЗКЛАД з ...`;
+- в [C:/Coding projects/university_timetables/src/timetable_scraper/utils.py](C:/Coding%20projects/university_timetables/src/timetable_scraper/utils.py) `normalize_program_candidate` теперь извлекает program из длинных biomed-заголовков вида `Освітня програма "Біологія" ОС "Магістр"`;
+- в [C:/Coding projects/university_timetables/src/timetable_scraper/qa.py](C:/Coding%20projects/university_timetables/src/timetable_scraper/qa.py) для `fit-schedule` добавлено узкое исключение: `Іноземна мова` может иметь длинный semicolon-separated список преподавателей, если в списке нет ссылок, аудиторий, времени или lesson markers; строки без предмета это не поднимает в `accepted`.
 
 Актуальный полный baseline после `python -m timetable_scraper run-batched --config config/knu_web_schedule.yaml --batch-size 5`:
 
@@ -327,6 +330,17 @@ python -m build
 - `Фізика ядра та елементарних частинок.xlsx`
 - `Архівістика та управл. док.xlsx`
 - `Фінанси публічного сектору.xlsx`
+
+Отдельный focused baseline после последних source-specific правок был записан в ignored-директорию [C:/Coding projects/university_timetables/out_knu_web_focus](C:/Coding%20projects/university_timetables/out_knu_web_focus). Он не заменяет полный [C:/Coding projects/university_timetables/out_knu_web](C:/Coding%20projects/university_timetables/out_knu_web), но подтверждает дельту по изменённым источникам:
+
+- `chem-schedule`: `443 accepted`, `40 review`, статус `parsed`;
+- `fit-schedule`: `30128 accepted`, `576 review`;
+- `biomed-schedule`: `618 accepted`, `503 review`;
+- workbook QA issues: `0`;
+- bad user-facing filenames: `0`;
+- forbidden accepted subjects: `0`.
+
+Попытка полного `python -m timetable_scraper run-batched --config config/knu_web_schedule.yaml --batch-size 5` после этих правок была остановлена локальным timeout через 60 минут до финального export. Поэтому полный baseline выше остаётся последним завершённым полным baseline; для следующего этапа нужен resumable/merge режим, который сможет заменять только пересобранные source-группы в общем output без повторного ожидания всех источников.
 
 ## Что нужно обновлять в этом файле при изменениях
 
