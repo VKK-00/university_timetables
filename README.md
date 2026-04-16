@@ -7,7 +7,7 @@
 ## Overview / Огляд
 
 - Fixed pipeline: `discover -> fetch -> parse -> normalize -> validate/confidence -> export -> post-run QA`
-- Main CLI entrypoints: `doctor`, `inspect-source`, `run`, `run-batched`
+- Main CLI entrypoints: `doctor`, `inspect-source`, `audit-reference`, `run`, `run-batched`
 - Output is template-driven: row 1 contains the program title, row 2 contains headers, row 3+ contains normalized rows
 - Row-level QA keeps broken or ambiguous rows out of exported Excel and moves them into `review_queue.xlsx`
 - Autofixes are tracked per row and written into dedicated reports
@@ -27,26 +27,30 @@
 
 ## Current KNU Coverage / Поточне покриття КНУ
 
-Latest full KNU web run source of truth: April 14, 2026
+Latest full KNU web run source of truth: April 16, 2026
 
-- `169` exported workbooks
-- `43110` accepted rows
-- `3435` review rows
-- `46455` rows with autofixes
+- `78` exported workbooks
+- `37741` accepted rows
+- `9019` review rows
+- `46667` rows with autofixes
 - `0` QA warnings
 - `0` QA failures
 
 Current source statuses:
 
-- `parsed`: `Geo`, `Econom`, `History`, `FIT`, `Psychology`, `REX`, `Sociology`, `Physics`, `Philosophy`, `Chemistry`, `Law`, `Journalism`, `Geology`, `Biomed`
+- `parsed`: `Econom`, `History`, `FIT`, `Psychology`, `REX`, `Sociology`, `Physics`, `Philosophy`, `Law`, `Journalism`, `Geology`, `Biomed`
 - `confirmed-blocker`: `Mechmat`, `CSC`, `Military`, `IHT`, `IIR`, `Philology`
-- `review-only`: none
+- `review-only`: `Geo`, `Chemistry`
 
 Largest parsed sources in the current run:
 
-- `FIT: 30045 accepted, 376 review`
-- `Physics: 5281 accepted, 576 review`
-- `Sociology: 2527 accepted, 725 review`
+- `FIT: 29936 accepted, 700 review`
+- `Sociology: 2955 accepted, 285 review`
+- `Econom: 980 accepted, 388 review`
+- `Physics: 829 accepted, 5027 review`
+- `Law: 776 accepted, 206 review`
+
+Current tiny workbook count in `out_knu_web/qa_report.json`: `4`
 
 Detailed coverage and source-level status are documented in:
 
@@ -110,6 +114,12 @@ Run the focused smoke set for the most failure-prone KNU sources:
 python -m timetable_scraper run-batched --config config/knu_web_smoke.yaml --batch-size 3
 ```
 
+Audit a manually filled local reference ZIP without committing it:
+
+```powershell
+python -m timetable_scraper audit-reference --zip drive-download-20260416T062121Z-3-001.zip
+```
+
 ## Config
 
 The main config file contains:
@@ -161,9 +171,24 @@ Manual official asset seeding:
 - seeded assets keep the original `source_root_url` provenance and are marked as `manual_seed` in discovery
 - example structure is provided in [`config/manual_assets.example.yaml`](./config/manual_assets.example.yaml)
 
+## Manual Reference Audit
+
+The local file `drive-download-20260416T062121Z-3-001.zip` is treated as a reference sample of manually filled KNU workbooks, not as production input. It is ignored by Git through `drive-download-*.zip`.
+
+The reference audit expects the manual workbook layout:
+
+- row 1: user-facing program or specialty title
+- row 2: 12 columns matching the export template
+- row 3+: timetable rows
+- workbooks: usually one workbook per program or specialty
+- sheets: usually course-level sheets such as `1 курс`, `2 курс`, `1 курс магістр`
+
+The audit command reads all `.xlsx` entries from the ZIP and summarizes titles, sheet names, week values, lesson types, groups, courses, and non-canonical headers. It does not write output files and does not add the ZIP to Git.
+
 ## Outputs
 
-- `out/<faculty>/<program>.xlsx`: normalized schedule workbooks exported in the template layout
+- `out/<faculty>/<program>.xlsx`: normalized schedule workbooks exported in the template layout; export groups rows by normalized `faculty + program`
+- sheets inside each workbook prefer normalized `course` labels such as `1 курс`, `2 курс`, `1 курс магістр`; technical source sheet names are used only if they pass label QA
 - `out/manifest.jsonl`: one JSON line per normalized row with provenance, warnings, confidence, QA flags, and content hash
 - `out/review_queue.xlsx`: rows that failed QA or remained ambiguous after parsing
 - `out/autofix_report.json`: machine-readable summary of autofix actions applied during normalization
@@ -197,10 +222,21 @@ Rows are moved to review if they show signs of:
 
 Additional guarantees in the current pipeline:
 
-- `week_type` is always filled; if no reliable week marker exists, the default is `Обидва`
+- `week_type` is always filled; if no reliable upper/lower marker exists, the default is `Обидва`
+- week ranges like `1-13 верхній` become `week_type=Верхній` and `notes=Тижні: 1-13`; pure ranges like `1-13` stay `Обидва` and keep the raw range in `notes`
 - `week_source` is preserved in normalized data
+- `lesson_type` is normalized to the manual format: `лекція`, `практичне заняття`, `семінар`, `лабораторне заняття`, plus safe real types like `практика`, `самостійна робота`, `факультатив`
+- payload fragments in lesson type cells, for example `IoT; лабораторна` or `1 підгрупа; лабораторна`, are split into `lesson_type`, `notes`, and `groups`
+- Excel numeric artifacts like `1.0`, `2.0`, `307.0` are normalized in `groups`, `course`, and `room`
+- bad user-facing program labels such as `3 к 1с`, `1к 1с 25-26`, `2с 25-26`, `1 рік навчання`, `1 2 курс`, `English 1c`, `Аркуш8`, `uploads`, `Завантажити`, `Nachytka`, malformed law transliteration labels, teacher-like names, chemistry group-grid labels, unmatched quotes, and date-prefixed FIT labels such as `01.09-05.09 АнД, КН, ТШІ` are blocked from workbook and sheet names
+- source-specific fallback programs are used only for confirmed sources: `sociology-schedule -> Соціологія`, `journ-schedule -> Журналістика`, `geology-schedule -> Геологія`, `law-schedule -> Право`, `philosophy-schedule -> Філософія`
+- labels such as `Психологія 1 курс "Магістр"` are split into clean `program=Психологія` and normalized `course=1 курс магістр`
+- Biomed labels drop service fragments such as `ДОСТАВИТИ`, `(укр)`, `ОП`, and `ОС`; semester-week service rows such as `І семестр тижнів: 13` do not become accepted subjects
 - `autofix_actions` is preserved in normalized data, `manifest.jsonl`, and `review_queue.xlsx`
 - orphan metadata-only rows are dropped when they cannot be merged back into a unique timetable slot safely
+- `sociology-schedule` has a narrow continuation merge for split uppercase or bilingual subjects inside one slot; hour-tail fragments are moved out of `subject`, and room payloads like `ауд. проф. ... ауд.312` are split into `teacher + room`
+- FIT grid parsing now does parser-level cleanup for merged subject cells: exact two-subject date-boundary split, inline date-list extraction into `notes`, inline room extraction into `room`, and trailing teacher extraction into `teacher`
+- leading clock-time prefixes inside subject cells, for example `14:10 Організація...`, are moved to `notes` instead of staying in `subject`
 - `run` cleans the target output directory before writing a new result set
 - post-run QA checks every exported workbook automatically
 
@@ -260,6 +296,7 @@ Useful commands during development:
 ```powershell
 python -m timetable_scraper doctor
 python -m timetable_scraper inspect-source --config config/sources.yaml
+python -m timetable_scraper audit-reference --zip drive-download-20260416T062121Z-3-001.zip
 python -m timetable_scraper run --config config/sources.yaml
 python -m timetable_scraper run --config config/knu_web_schedule.yaml
 python -m timetable_scraper run-batched --config config/knu_web_schedule.yaml --batch-size 5

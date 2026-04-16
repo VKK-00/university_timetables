@@ -15,13 +15,14 @@ from ..models import FetchedAsset, ParsedDocument, ParsedSheet, RawRecord
 from ..normalize import records_from_tabular_rows
 from ..utils import (
     DAY_NAMES,
-    looks_like_teacher_text,
     excerpt_from_values,
     flatten_multiline,
     infer_faculty_from_locator,
     looks_like_roomish_subject_text,
+    looks_like_teacher_text,
     normalize_day,
     normalize_header,
+    normalize_service_tokens,
     parse_time_range,
     parse_time_value,
 )
@@ -38,6 +39,17 @@ FIT_WEEK_RE = re.compile(r"(?i)(\[[^\]]+\]|\bч/т\b|\bпо\s+\d{2}\.\d{2}\b|\b�
 FIT_COUNT_RE = re.compile(r"^\d+(?:\.0)?$")
 FIT_TRAILING_WEEKS_RE = re.compile(r"\s*(\[[^\]]+\])+\s*$")
 FIT_T_COUNT_RE = re.compile(r"\b(\d+)\s*т\b", re.IGNORECASE)
+FIT_INLINE_DATE_RE = re.compile(r"\[\d{2}\.\d{2}(?:\s*,\s*\d{2}\.\d{2})*\]")
+FIT_INLINE_ROOM_SUFFIX_RE = re.compile(
+    r"(?iu)^(?P<subject>.+?)\s+(?P<room>(?:\d{1,4}[A-Za-zА-ЯІЇЄҐ]?\s*ауд\.?|ауд\.?\s*\d{1,4}[A-Za-zА-ЯІЇЄҐ]?))$"
+)
+FIT_TRAILING_TEACHER_FRAGMENT_RE = re.compile(
+    r"(?iu)^(?P<subject>.+?)\s+(?P<teacher>(?:(?:проф|доц|ас|ст\.викл|викл)\.?\s+)?[А-ЯІЇЄҐ][А-ЯІЇЄҐа-яіїєґ'’ʼ-]+\s+[А-ЯІЇЄҐ]\.\s*[А-ЯІЇЄҐ]\.?)$"
+)
+FIT_SPLIT_SUBJECT_WITH_DATES_RE = re.compile(
+    r"(?iu)^(?P<first>.+?)\s+(?P<first_date>\[\d{2}\.\d{2}(?:\s*,\s*\d{2}\.\d{2})*\])\s*\((?P<marker1>[A-Za-zА-ЯІЇЄҐа-яіїєґ]{1,6})\)\s+"
+    r"(?P<second_date>\[\d{2}\.\d{2}(?:\s*,\s*\d{2}\.\d{2})*\])\s+(?P<second>.+?)\s*\((?P<marker2>[A-Za-zА-ЯІЇЄҐа-яіїєґ]{1,6})\)$"
+)
 FIT_WEEK_TYPE_PATTERNS = (
     (re.compile(r"(?i)\bч/т\b"), "Через тиждень"),
     (re.compile(r"(?i)\b(?:i|1)\s*тиж"), "Верхній"),
@@ -51,13 +63,19 @@ FIT_LESSON_TYPES = {
     "л": "лекція",
     "лек": "лекція",
     "лекція": "лекція",
-    "лаб": "лабораторна",
-    "лабораторна": "лабораторна",
-    "пр": "практика",
-    "практ": "практика",
+    "лаб": "лабораторне заняття",
+    "лабораторна": "лабораторне заняття",
+    "лабораторне": "лабораторне заняття",
+    "пр": "практичне заняття",
+    "практ": "практичне заняття",
+    "практична": "практичне заняття",
+    "практичне": "практичне заняття",
     "практика": "практика",
     "сем": "семінар",
+    "с": "семінар",
+    "c": "семінар",
     "семінар": "семінар",
+    "lec": "лекція",
 }
 
 GENERIC_COURSE_RE = re.compile(r"(?i)\b(\d+)\s*курс\b")
@@ -244,35 +262,40 @@ def _parse_fit_grid_schedule_sheet(worksheet: Worksheet, *, faculty: str) -> tup
             groups = _compose_fit_groups(header_context, subject_cell.min_col, subject_cell.max_col)
             course = _compose_fit_courses(header_context, subject_cell.min_col, subject_cell.max_col)
             teacher, room, link, notes = _collect_fit_metadata(subject_cell, block_cells)
-            subject, lesson_type, subject_notes = _split_fit_subject(subject_cell.text)
-            merged_notes = _merge_notes(subject_notes, notes)
-            week_type = _infer_fit_week_type(subject_cell.text, subject_notes, notes)
-            values = {
-                "program": flatten_multiline(worksheet.title),
-                "faculty": faculty,
-                "week_type": week_type,
-                "day": day,
-                "start_time": start_time,
-                "end_time": end_time,
-                "subject": subject,
-                "teacher": teacher,
-                "lesson_type": lesson_type,
-                "link": link,
-                "room": room,
-                "groups": groups,
-                "course": course,
-                "notes": merged_notes,
-            }
-            if not values["subject"]:
-                continue
-            records.append(
-                RawRecord(
-                    values=values,
-                    row_index=slot_start,
-                    sheet_name=worksheet.title,
-                    raw_excerpt=excerpt_from_values(values),
-                )
-            )
+            raw_subject_entries = _split_fit_raw_subject_entries(subject_cell.text)
+            for raw_subject_entry in raw_subject_entries:
+                subject, lesson_type, subject_notes = _split_fit_subject(raw_subject_entry)
+                subject_entries = _split_fit_subject_entries(subject, _merge_notes(subject_notes))
+                for entry_subject, entry_notes in subject_entries:
+                    entry_subject, inline_notes, inline_teacher, inline_room = _extract_fit_subject_inline_metadata(entry_subject)
+                    if not entry_subject:
+                        continue
+                    merged_notes = _merge_notes(entry_notes, inline_notes, notes)
+                    week_type = _infer_fit_week_type(subject_cell.text, [entry_notes], notes)
+                    values = {
+                        "program": flatten_multiline(worksheet.title),
+                        "faculty": faculty,
+                        "week_type": week_type,
+                        "day": day,
+                        "start_time": start_time,
+                        "end_time": end_time,
+                        "subject": entry_subject,
+                        "teacher": _merge_fit_teacher_values(teacher, inline_teacher),
+                        "lesson_type": lesson_type,
+                        "link": link,
+                        "room": _join_unique([room, inline_room]),
+                        "groups": groups,
+                        "course": course,
+                        "notes": merged_notes,
+                    }
+                    records.append(
+                        RawRecord(
+                            values=values,
+                            row_index=slot_start,
+                            sheet_name=worksheet.title,
+                            raw_excerpt=excerpt_from_values(values),
+                        )
+                    )
     if not records:
         warnings.append(f"Could not extract FIT-style rows from sheet '{worksheet.title}'.")
     return records, warnings
@@ -470,6 +493,125 @@ def _split_fit_subject(text: str) -> tuple[str, str, list[str]]:
     return cleaned or flatten_multiline(text), lesson_type, _unique_list(notes)
 
 
+def _split_fit_raw_subject_entries(text: str) -> list[str]:
+    cleaned = normalize_service_tokens(text)
+    if not cleaned:
+        return []
+    match = FIT_SPLIT_SUBJECT_WITH_DATES_RE.fullmatch(cleaned)
+    if not match:
+        return [cleaned]
+    marker1 = normalize_service_tokens(match.group("marker1")).casefold()
+    marker2 = normalize_service_tokens(match.group("marker2")).casefold()
+    if marker1 != marker2:
+        return [cleaned]
+    first_subject = normalize_service_tokens(match.group("first")).strip(" ,;/")
+    second_subject = normalize_service_tokens(match.group("second")).strip(" ,;/")
+    if not _looks_like_fit_split_subject_candidate(first_subject) or not _looks_like_fit_split_subject_candidate(second_subject):
+        return [cleaned]
+    marker_text = normalize_service_tokens(match.group("marker1")).strip(" .,:;")
+    return [
+        f"{first_subject} ({marker_text}) {match.group('first_date')}",
+        f"{second_subject} ({marker_text}) {match.group('second_date')}",
+    ]
+
+
+def _extract_fit_subject_inline_metadata(text: str) -> tuple[str, list[str], str, str]:
+    cleaned = flatten_multiline(text)
+    if not cleaned:
+        return "", [], "", ""
+    notes = FIT_INLINE_DATE_RE.findall(cleaned)
+    if notes:
+        cleaned = FIT_INLINE_DATE_RE.sub(" ", cleaned)
+    cleaned = normalize_service_tokens(cleaned)
+    teacher = ""
+    teacher_match = FIT_TRAILING_TEACHER_FRAGMENT_RE.fullmatch(cleaned)
+    if teacher_match:
+        cleaned = normalize_service_tokens(teacher_match.group("subject")).strip(" ,;/")
+        teacher = normalize_service_tokens(teacher_match.group("teacher")).strip(" ,;/")
+    room = ""
+    room_match = FIT_INLINE_ROOM_SUFFIX_RE.fullmatch(cleaned)
+    if room_match:
+        cleaned = normalize_service_tokens(room_match.group("subject")).strip(" ,;/")
+        room = _normalize_fit_room(room_match.group("room"))
+    cleaned = normalize_service_tokens(cleaned).strip(" ,;/.-")
+    if not cleaned or len(cleaned) < 4 or not any(character.isalpha() for character in cleaned):
+        return flatten_multiline(text), [], "", ""
+    return cleaned, _unique_list(notes), teacher, room
+
+
+def _normalize_fit_room(text: str) -> str:
+    cleaned = normalize_service_tokens(text).strip(" .")
+    if not cleaned:
+        return ""
+    prefix_match = re.fullmatch(r"(?iu)ауд\.?\s*(\d{1,4}[A-Za-zА-ЯІЇЄҐ]?)", cleaned)
+    if prefix_match:
+        return f"ауд. {prefix_match.group(1)}"
+    suffix_match = re.fullmatch(r"(?iu)(\d{1,4}[A-Za-zА-ЯІЇЄҐ]?)\s*ауд\.?", cleaned)
+    if suffix_match:
+        return f"ауд. {suffix_match.group(1)}"
+    return cleaned
+
+
+def _merge_fit_teacher_values(primary: str, secondary: str) -> str:
+    primary_clean = normalize_service_tokens(primary)
+    secondary_clean = normalize_service_tokens(secondary)
+    if not primary_clean:
+        return secondary_clean
+    if not secondary_clean:
+        return primary_clean
+    if _normalize_fit_teacher_key(primary_clean) == _normalize_fit_teacher_key(secondary_clean):
+        return primary_clean
+    return _join_unique([primary_clean, secondary_clean])
+
+
+def _normalize_fit_teacher_key(value: str) -> str:
+    cleaned = normalize_service_tokens(value).casefold()
+    cleaned = re.sub(r"(?iu)^(?:проф|доц|ас|ст\.викл|викл)\.?\s+", "", cleaned)
+    return re.sub(r"[\W_]+", "", cleaned, flags=re.UNICODE)
+
+
+def _split_fit_subject_entries(subject: str, notes: str) -> list[tuple[str, str]]:
+    cleaned_subject = normalize_service_tokens(subject)
+    cleaned_notes = normalize_service_tokens(notes)
+    if not cleaned_subject:
+        return []
+    match = FIT_SPLIT_SUBJECT_WITH_DATES_RE.fullmatch(cleaned_subject)
+    if not match:
+        return [(cleaned_subject, cleaned_notes)]
+    marker1 = normalize_service_tokens(match.group("marker1")).casefold()
+    marker2 = normalize_service_tokens(match.group("marker2")).casefold()
+    if marker1 != marker2:
+        return [(cleaned_subject, cleaned_notes)]
+    first_subject = normalize_service_tokens(match.group("first")).strip(" ,;/")
+    second_subject = normalize_service_tokens(match.group("second")).strip(" ,;/")
+    if min(len(first_subject), len(second_subject)) < 12:
+        return [(cleaned_subject, cleaned_notes)]
+    if not _looks_like_fit_split_subject_candidate(first_subject) or not _looks_like_fit_split_subject_candidate(second_subject):
+        return [(cleaned_subject, cleaned_notes)]
+    trailing_notes = [cleaned_notes] if cleaned_notes else []
+    return [
+        (first_subject, _merge_notes(match.group("first_date"))),
+        (second_subject, _merge_notes(match.group("second_date"), *trailing_notes)),
+    ]
+
+
+def _looks_like_fit_split_subject_candidate(text: str) -> bool:
+    cleaned = normalize_service_tokens(text).strip(" ,;/")
+    if len(cleaned) < 12:
+        return False
+    if not any(character.isalpha() for character in cleaned):
+        return False
+    if looks_like_teacher_text(cleaned):
+        return False
+    if looks_like_roomish_subject_text(cleaned):
+        return False
+    if FIT_ROOM_RE.search(cleaned) and not _looks_like_subject_text(cleaned):
+        return False
+    if _looks_like_fit_noise_text(cleaned):
+        return False
+    return len(re.findall(r"(?u)[A-Za-zА-ЯІЇЄҐа-яіїєґ]{2,}", cleaned)) >= 2
+
+
 def _split_bracket_notes(text: str) -> tuple[str, list[str]]:
     notes = re.findall(r"\[[^\]]+\]", text)
     cleaned = re.sub(r"\[[^\]]+\]", "", text).strip()
@@ -514,9 +656,12 @@ def _compose_fit_courses(header_context: dict[str, dict[int, str]], min_col: int
     return "; ".join(_unique_list(course_values))
 
 
-def _merge_notes(*note_groups: list[str]) -> str:
+def _merge_notes(*note_groups: Any) -> str:
     notes: list[str] = []
     for group in note_groups:
+        if isinstance(group, str):
+            notes.append(group)
+            continue
         notes.extend(group)
     return "; ".join(_unique_list(notes))
 

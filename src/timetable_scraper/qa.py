@@ -70,10 +70,10 @@ TINY_BAD_PROGRAM_PATTERNS = (
     re.compile(r"(?iu)^.+\s+\((?:л|пр|лаб|сем)\)$"),
 )
 DROP_REVIEW_SERVICE_RE = re.compile(
-    r"(?iu)^(?:день\s+самост[іi]йної\s+роботи|самост[іi]й[-\s/]*н\w*(?:\s*/\s*|\s+)робот\w*|вільний\s+день)$"
+    r"(?iu)^(?:день\s+самост[іi]йної\s+роботи|тижні\s+самост[іi]йної\s+роботи|самост[іi]й[-\s/]*н\w*(?:\s*/\s*|\s+)робот\w*|вільний\s+день|посвята\s+в\s+першокурсники)$"
 )
 DROP_REVIEW_TECHNICAL_RE = re.compile(
-    r"(?iu)^(?:classroom\.?|google\s+classroom\.?|гугл\s+клас:?\.?|\[\d{2}\.\d{2}(?:,\s*\d{2}\.\d{2})*\](?:\s*(?:\.|\((?:пр|л|лек|практ|сем|лаб|с|c)\))\s*)?|вкл\.?\s*\d{2}\.\d{2}\.?|(?:іd|id)\s*:\s*\d+(?:\s+\d+)+|понедельник|вторник|среда|четверг|пятница|суббота|воскресенье)$"
+    r"(?iu)^(?:classroom\.?|google\s+classroom\.?|гугл\s+клас:?\.?|\[\d{2}\.\d{2}(?:,\s*\d{2}\.\d{2})*\](?:\s*(?:\.|\((?:пр|л|лек|практ|сем|лаб|с|c)\))\s*)?|вкл\.?\s*\d{2}\.\d{2}\.?|(?:іd|id)\s*:\s*\d+(?:\s+\d+)+|понедельник|вторник|среда|четверг|пятница|суббота|воскресенье|понеділок|вівторок|середа|четвер|п'ятниця|субота|неділя)$"
 )
 DATE_LIST_TOKEN = r"\[\d{2}\.\d{2}(?:\s*,\s*\d{2}\.\d{2})*\s*\]"
 DROP_REVIEW_DATE_LIST_ONLY_RE = re.compile(rf"(?iu)^{DATE_LIST_TOKEN}(?:\s*;\s*{DATE_LIST_TOKEN})*$")
@@ -359,15 +359,25 @@ def _looks_like_fragment_subject(subject: str) -> bool:
 
 
 def _resolve_program_label(row: NormalizedRow) -> str:
+    program = "" if _is_source_weak_program_label(row.source_name, row.program) else row.program
     return coalesce_program_label(
-        row.program,
+        program,
         _extract_phys_program_from_groups(row),
-        row.groups,
         infer_asset_label_from_locator(row.asset_locator),
+        _source_program_fallback(row.source_name),
         row.sheet_name,
-        _program_hint_from_notes(row.notes),
-        humanize_source_name(row.source_name),
+        _source_program_hint_from_notes(row),
     )
+
+
+def _source_program_fallback(source_name: str) -> str:
+    return {
+        "geology-schedule": "Геологія",
+        "journ-schedule": "Журналістика",
+        "law-schedule": "Право",
+        "philosophy-schedule": "Філософія",
+        "sociology-schedule": "Соціологія",
+    }.get(source_name.casefold(), "")
 
 
 def _course_as_program_label(course: str) -> str:
@@ -403,6 +413,45 @@ def _extract_phys_program_from_groups(row: NormalizedRow) -> str:
     if looks_like_bad_program_label(label):
         return ""
     return label
+
+
+def _is_source_weak_program_label(source_name: str, program: str) -> bool:
+    cleaned = normalize_service_tokens(program)
+    if not cleaned:
+        return False
+    if source_name.casefold() == "phys-schedule":
+        return not _looks_like_phys_program_hint(cleaned)
+    return False
+
+
+def _source_program_hint_from_notes(row: NormalizedRow) -> str:
+    hint = _program_hint_from_notes(row.notes)
+    if not hint:
+        return ""
+    if row.source_name.casefold() == "phys-schedule" and not _looks_like_phys_program_hint(hint):
+        return ""
+    return hint
+
+
+def _looks_like_phys_program_hint(value: str) -> bool:
+    cleaned = normalize_service_tokens(value).casefold()
+    if not cleaned:
+        return False
+    safe_markers = (
+        "фіз",
+        "астроном",
+        "оптик",
+        "оптотех",
+        "наносистем",
+        "наномат",
+        "матеріал",
+        "мат-во",
+        "м-во",
+        "ядер",
+        "елементар",
+        "коледж",
+    )
+    return any(marker in cleaned for marker in safe_markers)
 
 
 def _program_hint_from_notes(notes: str) -> str:
@@ -476,7 +525,7 @@ def _should_demote_tiny_program_bucket(rows: list[NormalizedRow]) -> bool:
             if normalize_service_tokens(row.notes)
         ]
         if (
-            program.casefold() == "лаб.діагностика бакалавр"
+            program.casefold() in {"лаб.діагностика бакалавр", "лаб.діагностика"}
             and len(normalized_notes) == len(rows)
             and normalized_subjects == {"Ендокринологія з оцінкою результатів досліджень"}
             and any(" ; " in note for note in normalized_notes)

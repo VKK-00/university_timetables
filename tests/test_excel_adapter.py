@@ -104,7 +104,7 @@ def test_fit_style_grid_workbook_is_parsed() -> None:
     assert record.values["start_time"] == "09:00"
     assert record.values["end_time"] == "10:20"
     assert record.values["subject"] == "Архітектура комп'ютера"
-    assert record.values["lesson_type"] == "лабораторна"
+    assert record.values["lesson_type"] == "лабораторне заняття"
     assert record.values["week_type"] == "Верхній"
     assert record.values["teacher"] == "Вовна О. В."
     assert record.values["room"] == "109 ауд."
@@ -158,6 +158,118 @@ def test_fit_style_grid_subject_with_embedded_teacher_is_normalized() -> None:
     assert row.teacher == "Меркулова К. В."
     assert row.lesson_type == "лекція"
     assert row.room == "ауд. 203"
+
+
+def test_fit_style_grid_extracts_inline_date_room_and_teacher_tail() -> None:
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "АнД, КН, ТШІ"
+    worksheet["A2"] = "день"
+    worksheet["B2"] = "час"
+    worksheet["C2"] = "1 курс АнД, КН, ТШІ"
+    worksheet.merge_cells("C2:D2")
+    worksheet["C3"] = "група АНД-11"
+    worksheet.merge_cells("C3:D3")
+    worksheet["C4"] = "підгрупа АНД-11/1"
+    worksheet.merge_cells("C4:D4")
+    worksheet["A5"] = "понеділок"
+    worksheet["B5"] = "9:00-10:20"
+    worksheet["C5"] = "Алг. та прогр. [24.11] 307 ауд. ас. Гамоцька С.Л."
+    worksheet.merge_cells("C5:D7")
+    worksheet["C8"] = "I тиждень"
+    worksheet.merge_cells("C8:D8")
+    worksheet["C10"] = "306 ауд."
+    worksheet["D10"] = "https://meet.example/class"
+
+    buffer = BytesIO()
+    workbook.save(buffer)
+    asset = DiscoveredAsset(
+        source_name="fit-schedule",
+        source_kind="google_sheet",
+        source_url_or_path="https://fit.knu.ua/for-students/lessons-schedule",
+        asset_kind="google_sheet",
+        locator="https://docs.google.com/spreadsheets/d/test/edit#gid=0",
+        display_name="fit-grid-inline.xlsx",
+    )
+    fetched = FetchedAsset(
+        asset=asset,
+        content=buffer.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        content_hash="fit-grid-inline",
+        resolved_locator="fit-grid-inline.xlsx",
+    )
+
+    document = parse_excel_asset(fetched)
+    rows = normalize_document(document)
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.subject == "Алг. та прогр"
+    assert "Гамоцька С.Л." in row.teacher
+    assert "[24.11]" in row.notes
+    assert "ауд. 306" in row.room
+    assert "ауд. 307" in row.room
+    assert "meet.example" in row.link
+
+
+def test_fit_style_grid_splits_exact_two_subject_merged_cell_by_date_boundary() -> None:
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "ІПЗ"
+    worksheet["A2"] = "день"
+    worksheet["B2"] = "час"
+    worksheet["C2"] = "1 курс ІПЗ"
+    worksheet.merge_cells("C2:D2")
+    worksheet["C3"] = "група ІПЗ-11"
+    worksheet.merge_cells("C3:D3")
+    worksheet["C4"] = "підгрупа ІПЗ-11/1"
+    worksheet.merge_cells("C4:D4")
+    worksheet["A5"] = "вівторок"
+    worksheet["B5"] = "13:40-15:00"
+    worksheet["C5"] = (
+        "Професійна та корпоративна етика [14.11] (C) "
+        "[21.11] Методика викладання професійної освіти (C)"
+    )
+    worksheet.merge_cells("C5:D7")
+    worksheet["C8"] = "I тиждень"
+    worksheet.merge_cells("C8:D8")
+    worksheet["C9"] = "доц. Іваненко І.І."
+    worksheet.merge_cells("C9:D9")
+    worksheet["C10"] = "211 ауд."
+    worksheet["D10"] = "https://meet.example/split"
+
+    buffer = BytesIO()
+    workbook.save(buffer)
+    asset = DiscoveredAsset(
+        source_name="fit-schedule",
+        source_kind="google_sheet",
+        source_url_or_path="https://fit.knu.ua/for-students/lessons-schedule",
+        asset_kind="google_sheet",
+        locator="https://docs.google.com/spreadsheets/d/test/edit#gid=0",
+        display_name="fit-grid-split.xlsx",
+    )
+    fetched = FetchedAsset(
+        asset=asset,
+        content=buffer.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        content_hash="fit-grid-split",
+        resolved_locator="fit-grid-split.xlsx",
+    )
+
+    document = parse_excel_asset(fetched)
+    rows = normalize_document(document)
+
+    assert len(rows) == 2
+    rows_by_subject = {row.subject: row for row in rows}
+    assert set(rows_by_subject) == {
+        "Професійна та корпоративна етика",
+        "Методика викладання професійної освіти",
+    }
+    assert "[14.11]" in rows_by_subject["Професійна та корпоративна етика"].notes
+    assert "[21.11]" in rows_by_subject["Методика викладання професійної освіти"].notes
+    assert all(row.teacher == "доц. Іваненко І.І." for row in rows)
+    assert all(row.room == "ауд. 211" for row in rows)
+    assert all("meet.example" in row.link for row in rows)
 
 
 def test_generic_grid_workbook_is_parsed() -> None:

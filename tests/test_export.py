@@ -191,6 +191,7 @@ def test_export_rows_normalize_recovered_program_alias_for_filename(tmp_path: Pa
             subject="Біоінформатика",
             groups="Генетичнии аналіз",
             sheet_name="1 курс",
+            asset_locator="fixtures/генетичнии аналіз.xlsx",
         )
     ]
 
@@ -198,3 +199,89 @@ def test_export_rows_normalize_recovered_program_alias_for_filename(tmp_path: Pa
 
     assert len(exported_files) == 1
     assert exported_files[0].stem == "Генетичний аналіз"
+
+
+def test_export_rows_groups_same_program_by_course_sheets(tmp_path: Path) -> None:
+    template_path = next(Path(".").glob("*.xlsx")).resolve()
+    rows = [
+        NormalizedRow(
+            program="Соціологія",
+            faculty="Факультет соціології",
+            week_type="Верхній",
+            day="Понеділок",
+            start_time="08:30",
+            end_time="09:50",
+            subject="Соціологічна теорія",
+            lesson_type="лекція",
+            course="1",
+            sheet_name="3 к 1с",
+        ),
+        NormalizedRow(
+            program="Соціологія",
+            faculty="Факультет соціології",
+            week_type="Нижній",
+            day="Вівторок",
+            start_time="10:00",
+            end_time="11:20",
+            subject="Методи соціологічного дослідження",
+            lesson_type="практичне заняття",
+            course="2.0",
+            sheet_name="2с 25 26",
+        ),
+    ]
+
+    exported_files, _, _ = export_rows(rows, [], template_path=template_path, output_dir=tmp_path / "out")
+
+    assert len(exported_files) == 1
+    assert exported_files[0].stem == "Соціологія"
+    workbook = load_workbook(exported_files[0])
+    assert workbook.sheetnames == ["1 курс", "2 курс"]
+
+
+def test_export_rows_do_not_use_compact_technical_sheet_names(tmp_path: Path) -> None:
+    template_path = next(Path(".").glob("*.xlsx")).resolve()
+    rows = [
+        NormalizedRow(
+            program="Соціологія",
+            faculty="Факультет соціології",
+            week_type="Верхній",
+            day="Понеділок",
+            start_time="08:30",
+            end_time="09:50",
+            subject="Соціологічна теорія",
+            lesson_type="лекція",
+            sheet_name="1к 1с 25-26",
+        ),
+        NormalizedRow(
+            program="Соціологія",
+            faculty="Факультет соціології",
+            week_type="Нижній",
+            day="Вівторок",
+            start_time="10:00",
+            end_time="11:20",
+            subject="Методи соціологічного дослідження",
+            lesson_type="практичне заняття",
+            sheet_name="2с 25-26",
+        ),
+        NormalizedRow(
+            program="Соціологія",
+            faculty="Факультет соціології",
+            week_type="Обидва",
+            day="Середа",
+            start_time="11:40",
+            end_time="13:00",
+            subject="Sociology of Gender",
+            lesson_type="лекція",
+            sheet_name="English 1c",
+        ),
+    ]
+
+    exported_files, _, _ = export_rows(rows, [], template_path=template_path, output_dir=tmp_path / "out")
+
+    assert len(exported_files) == 1
+    workbook = load_workbook(exported_files[0])
+    assert "1 курс" in workbook.sheetnames
+    assert "Соціологія" in workbook.sheetnames
+    assert "1к 1с 25-26" not in workbook.sheetnames
+    assert "2с 25-26" not in workbook.sheetnames
+    assert "English 1c" not in workbook.sheetnames

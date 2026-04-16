@@ -42,7 +42,7 @@ def test_normalize_record_strips_pdf_date_tail_from_subject() -> None:
     )
 
     assert row.subject == "Іноземна мова"
-    assert row.lesson_type == "практична"
+    assert row.lesson_type == "практичне заняття"
     assert "03.03.2026 16:00" in row.notes
 
 
@@ -65,7 +65,7 @@ def test_normalize_record_strips_pdf_link_fragments_and_collapses_subject() -> N
     )
 
     assert row.subject == "Топографія з основами геодезії"
-    assert row.lesson_type == "лабораторна"
+    assert row.lesson_type == "лабораторне заняття"
     assert "?p=l9XZ" not in row.subject
     assert ".com" not in row.subject
 

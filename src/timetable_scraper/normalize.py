@@ -15,6 +15,7 @@ from .utils import (
     coalesce_label,
     coalesce_program_label,
     contains_link_text,
+    extract_week_type_notes,
     flatten_multiline,
     humanize_source_name,
     infer_asset_label_from_locator,
@@ -129,7 +130,7 @@ INITIALS_ONLY_RE = re.compile(r"(?iu)^[А-ЯІЇЄҐ]\.\s*[А-ЯІЇЄҐ]\.?$")
 TITLE_ONLY_RE = re.compile(r"(?iu)^(?:проф|доц|ас|асист|викл|ст\.?\s*викл|phd|к\.\s*[юф]\.\s*н|д\.\s*[юф]\.\s*н)\.?$")
 COMPACT_SURNAME_INITIALS_RE = re.compile(r"(?iu)^([А-ЯІЇЄҐ][а-яіїєґ'’ʼ\-]+)([А-ЯІЇЄҐ]\.\s*[А-ЯІЇЄҐ]\.?)$")
 PERSON_NAME_WITH_INITIALS_RE = re.compile(r"(?iu)^[А-ЯІЇЄҐ][а-яіїєґ'’ʼ\-]+\s+[А-ЯІЇЄҐ]\.\s*[А-ЯІЇЄҐ]\.?$")
-ROOM_SEGMENT_RE = re.compile(r"(?iu)^(?:\d{3,4}[А-ЯІЇЄҐA-Z]?(?:/\d+)?|[А-ЯІЇЄҐA-Z]-?\d{2,4}|online|онлайн)$")
+ROOM_SEGMENT_RE = re.compile(r"(?iu)^(?:\d{3,4}(?:\.0)?[А-ЯІЇЄҐA-Z]?(?:/\d+)?|[А-ЯІЇЄҐA-Z]-?\d{2,4}|online|онлайн)$")
 CODE_SEGMENT_RE = re.compile(r"(?iu)^(?:meeting id|passcode|код доступу|ідентифікатор конференції|идентификатор конференции|t=\d+)\b|^[A-Za-z0-9+/=_-]{10,}$")
 TRAILING_ROOM_RE = re.compile(
     r"(?iu)^(?P<subject>.+?)(?:\s*/\s*|\s+)(?P<room>(?:\d{3,4}[А-ЯІЇЄҐA-Z]?|[А-ЯІЇЄҐA-Z]-?\d{2,4}|(?:хімічний|географічний)\s+ф-?т\s+\d{2,4}))$"
@@ -140,9 +141,10 @@ MEETING_ABBR_RE = re.compile(r"(?iu)^(?:ік|кд|id|pwd)\s*:")
 LESSON_TYPE_PATTERNS = (
     (re.compile(r"(?iu)\b(?:л|л\.|лек|лекція)\b"), "лекція"),
     (re.compile(r"(?iu)\b(?:лекц|лекц\.|лекції)\b"), "лекція"),
-    (re.compile(r"(?iu)\b(?:пр|пр\.|практ|практична)\b"), "практична"),
-    (re.compile(r"(?iu)\b(?:лаб|лаб\.|лабораторна)\b"), "лабораторна"),
-    (re.compile(r"(?iu)\b(?:сем|сем\.)\b"), "семінар"),
+    (re.compile(r"(?iu)\b(?:lec|lecture)\b"), "лекція"),
+    (re.compile(r"(?iu)\b(?:пр|пр\.|практ|практ\.|практична|практичне|практичні|практичний\s+курс)\b"), "практичне заняття"),
+    (re.compile(r"(?iu)\b(?:лаб|лаб\.|лабораторна|лабораторне|лабораторні|лабораторний\s+практикум|лабораторна\s+робота)\b"), "лабораторне заняття"),
+    (re.compile(r"(?iu)\b(?:сем|сем\.|семінари)\b"), "семінар"),
 )
 ABBREVIATED_SUBJECT_RE = re.compile(r"(?iu)^(?:ст|ас|доц|проф|викл)\.?$")
 LEADING_TEACHER_SEGMENT_RE = re.compile(
@@ -191,34 +193,52 @@ LESSON_TYPE_MARKER_VALUES = {
     "lek": "лекція",
     "lek.": "лекція",
     "lecture": "лекція",
-    "пр": "практична",
-    "пр.": "практична",
-    "практ": "практична",
-    "практ.": "практична",
-    "практична": "практична",
-    "prac": "практична",
-    "prac.": "практична",
-    "practical": "практична",
-    "лаб": "лабораторна",
-    "лаб.": "лабораторна",
-    "лабораторна": "лабораторна",
-    "lab": "лабораторна",
-    "lab.": "лабораторна",
+    "lec": "лекція",
+    "lec.": "лекція",
+    "пр": "практичне заняття",
+    "пр.": "практичне заняття",
+    "практ": "практичне заняття",
+    "практ.": "практичне заняття",
+    "практична": "практичне заняття",
+    "практичне": "практичне заняття",
+    "практичні": "практичне заняття",
+    "практичне заняття": "практичне заняття",
+    "prac": "практичне заняття",
+    "prac.": "практичне заняття",
+    "practical": "практичне заняття",
+    "лаб": "лабораторне заняття",
+    "лаб.": "лабораторне заняття",
+    "лабораторна": "лабораторне заняття",
+    "лабораторне": "лабораторне заняття",
+    "лабораторні": "лабораторне заняття",
+    "лабораторне заняття": "лабораторне заняття",
+    "лабораторні заняття": "лабораторне заняття",
+    "лабораторний практикум": "лабораторне заняття",
+    "лаб. практикум": "лабораторне заняття",
+    "лабораторна робота": "лабораторне заняття",
+    "lab": "лабораторне заняття",
+    "lab.": "лабораторне заняття",
     "сем": "семінар",
     "сем.": "семінар",
     "семінар": "семінар",
+    "семінари": "семінар",
+    "с": "семінар",
+    "c": "семінар",
     "sem": "семінар",
     "sem.": "семінар",
     "seminar": "семінар",
+    "практика": "практика",
+    "самостійна робота": "самостійна робота",
+    "факультатив": "факультатив",
 }
 PURE_LESSON_TYPE_SUBJECT_RE = re.compile(
-    r"(?iu)^\(?\s*(?P<marker>л|л\.|лек|лек\.|лекц|лекц\.|лекції|лекція|lek|lek\.|lecture|пр|пр\.|практ|практ\.|практична|prac|prac\.|practical|лаб|лаб\.|лабораторна|lab|lab\.|сем|сем\.|семінар|sem|sem\.|seminar)\s*\)?$"
+    r"(?iu)^\(?\s*(?P<marker>л|л\.|лек|лек\.|лекц|лекц\.|лекції|лекція|lek|lek\.|lec|lec\.|lecture|пр|пр\.|практ|практ\.|практична|практичне|практичні|prac|prac\.|practical|лаб|лаб\.|лабораторна|лабораторне|лабораторні|lab|lab\.|сем|сем\.|семінар|семінари|с|c|sem|sem\.|seminar)\s*\)?$"
 )
 TRAILING_SUBJECT_MARKER_RE = re.compile(
     r"(?iu)(?P<prefix>.+?)\s*(?:[\[(]?\s*(?P<marker>іспит|екзамен|залік|захист|дист\.?|дистанц\.?|дистанційно)\s*[\])]?\.?)$"
 )
 LEADING_SUBJECT_MARKER_RE = re.compile(
-    r"(?iu)^(?:[\[(]?\s*)?(?P<marker>л|л\.|лек|лек\.|лекц|лекц\.|лекції|лекція|lek|lek\.|lecture|пр|пр\.|практ|практ\.|практична|prac|prac\.|practical|лаб|лаб\.|лабораторна|lab|lab\.|сем|сем\.|семінар|sem|sem\.|seminar)\s*[\])\].,:-]+\s*(?P<rest>.+)$"
+    r"(?iu)^(?:[\[(]?\s*)?(?P<marker>л|л\.|лек|лек\.|лекц|лекц\.|лекції|лекція|lek|lek\.|lec|lec\.|lecture|пр|пр\.|практ|практ\.|практична|практичне|практичні|prac|prac\.|practical|лаб|лаб\.|лабораторна|лабораторне|лабораторні|lab|lab\.|сем|сем\.|семінар|семінари|с|c|sem|sem\.|seminar)\s*[\])\].,:-]+\s*(?P<rest>.+)$"
 )
 LEADING_DATED_SUBJECT_RE = re.compile(
     r"(?iu)^(?P<prefix>\d{1,2}\.\d{1,2}\.?(?:\s+модул\w*\.?)?)\s+(?P<rest>.+)$"
@@ -235,6 +255,7 @@ LEADING_EVENT_PREFIX_RE = re.compile(
 LEADING_TIME_NOTICE_SUBJECT_RE = re.compile(
     r"(?iu)^(?P<prefix>(?:лекц(?:ії|ія|\.|)|лек(?:ція|\.|)|практ(?:ичні|ична|\.|)|лаб(?:ораторні|ораторна|\.|))?\s*початок\s+о\s+\d{1,2}[:.]\d{2})\s+(?P<rest>.+)$"
 )
+LEADING_CLOCK_TIME_SUBJECT_RE = re.compile(r"(?iu)^(?P<prefix>\d{1,2}[:.]\d{2})\s+(?P<rest>.+)$")
 TRAILING_TEACHER_FRAGMENT_RE = re.compile(
     r"(?iu)^(?P<subject>.+?)\s*[.;,]?\s*(?P<teacher>(?:(?:проф|доц|ас|асист|викл|dr|prof)\.?\s+)?[А-ЯІЇЄҐA-Z][А-ЯІЇЄҐA-Zа-яіїєґa-z'’ʼ-]+(?:\s+[А-ЯІЇЄҐA-Z]\.(?:\s*[А-ЯІЇЄҐA-Z]\.?)?|\s+[А-ЯІЇЄҐA-Z]\.?\s+[А-ЯІЇЄҐA-Z]\.?))$"
 )
@@ -293,6 +314,12 @@ EXPLICIT_GROUP_VALUE_RE = re.compile(r"(?iu)\b(?:група|підгрупа|к�
 GROUP_CODE_VALUE_RE = re.compile(r"(?iu)^[A-ZА-ЯІЇЄҐ]{1,8}-\d{1,2}[A-ZА-ЯІЇЄҐa-zа-яіїєґ0-9-]{0,8}$")
 SELF_STUDY_SUBJECT_RE = re.compile(r"(?iu)^самост[іi]й[-\s/]*н\w*(?:\s*/\s*|\s+)робот\w*$")
 SELF_STUDY_DAY_RE = re.compile(r"(?iu)^день\s+самост[іi]йної\s+роботи$")
+SOCIOLOGY_ROOM_TEACHER_RE = re.compile(
+    r"(?iu)^ауд\.?\s+(?P<teacher>(?:(?:проф|доц|ас|асист|викл)\.?\s*)?[А-ЯІЇЄҐ][А-ЯІЇЄҐа-яіїєґ'’ʼ-]+\s+[А-ЯІЇЄҐ]\.\s*[А-ЯІЇЄҐ]\.?)\s+ауд\.?\s*(?P<room>\d{1,4}[A-Za-zА-ЯІЇЄҐ]?)$"
+)
+SOCIOLOGY_TRUNCATED_HOUR_TAIL_RE = re.compile(
+    r"(?iu)^\(?\s*(?:(?:[ЛПРСC]{1,2}\s*-\s*)?\d+\s*год\.?(?:\s*[,/]\s*(?:[ЛПРСC]{1,2}\s*-\s*)?\d+\s*год\.?)*)\s*\)?$"
+)
 
 
 def map_headers(headers: list[Any]) -> dict[str, int]:
@@ -398,6 +425,10 @@ def normalize_record(record: RawRecord, *, document: ParsedDocument) -> Normaliz
         autofix_actions.append("subject_from_groups")
 
     cleaned_fields = _cleanup_structured_fields(values)
+    course_from_program = _extract_course_from_program_label(cleaned_fields["program"])
+    if course_from_program and not cleaned_fields["course"]:
+        cleaned_fields["course"] = course_from_program
+        autofix_actions.append("course_from_program_label")
     if not cleaned_fields["subject"]:
         cleaned_fields, inferred_from_notes = _infer_subject_from_notes(cleaned_fields)
         if inferred_from_notes:
@@ -411,6 +442,10 @@ def normalize_record(record: RawRecord, *, document: ParsedDocument) -> Normaliz
         cleaned_fields["notes"],
         record.raw_excerpt,
     )
+    week_notes = extract_week_type_notes(values["week_type"])
+    if week_notes:
+        cleaned_fields["notes"] = _merge_unique([cleaned_fields["notes"], *week_notes])
+        autofix_actions.append("week_range_to_notes")
     if week_source == "default":
         autofix_actions.append("week_type_defaulted")
     elif week_source == "inferred":
@@ -464,14 +499,16 @@ def normalize_record(record: RawRecord, *, document: ParsedDocument) -> Normaliz
     display_stem = Path(flatten_multiline(source_asset.display_name) or source_label).stem
     note_program_hint = _extract_program_hint(cleaned_fields["notes"])
     asset_label = infer_asset_label_from_locator(source_asset.locator)
+    source_program_fallback = _source_program_fallback(source_name)
     if note_program_hint and not cleaned_fields["program"]:
         autofix_actions.append("program_from_notes")
     program = coalesce_program_label(
         cleaned_fields["program"],
         note_program_hint,
-        record.sheet_name,
         asset_label,
         display_stem,
+        source_program_fallback,
+        record.sheet_name,
     )
     normalized_program = _normalize_program_label(program)
     if normalized_program != program and normalized_program:
@@ -700,12 +737,22 @@ def _merge_subject_continuation_rows(rows: list[NormalizedRow]) -> list[Normaliz
             continuation, duplicate_rows = _find_subject_continuation_row(rows, index, consumed_ids)
             if continuation is None:
                 break
-            row.subject = _merge_subject_fragments(row.subject, continuation.subject)
+            continuation_subject = continuation.subject
+            continuation_lesson_type = continuation.lesson_type
+            continuation_notes = continuation.notes
+            if row.source_name == "sociology-schedule":
+                continuation_subject, extracted_lesson_type, sociology_notes = _extract_sociology_continuation_payload(
+                    continuation.subject
+                )
+                continuation_lesson_type = _merge_unique([continuation.lesson_type, extracted_lesson_type])
+                continuation_notes = _merge_unique([continuation.notes, sociology_notes])
+            if continuation_subject:
+                row.subject = _merge_subject_fragments(row.subject, continuation_subject)
             row.teacher = _merge_unique([row.teacher, continuation.teacher])
-            row.lesson_type = _normalize_lesson_type_field(_merge_unique([row.lesson_type, continuation.lesson_type]))
+            row.lesson_type = _normalize_lesson_type_field(_merge_unique([row.lesson_type, continuation_lesson_type]))
             row.link = _merge_unique([row.link, continuation.link], separator=" ")
             row.room = _merge_unique([row.room, continuation.room])
-            row.notes = _merge_unique([row.notes, continuation.notes])
+            row.notes = _merge_unique([row.notes, continuation_notes])
             row.autofix_actions = list(dict.fromkeys([*row.autofix_actions, "subject_continuation_merged"]))
             consumed_ids.add(id(continuation))
             for duplicate_row in duplicate_rows:
@@ -800,9 +847,11 @@ def _looks_like_subject_continuation(current: NormalizedRow, candidate: Normaliz
         return False
     if _normalize_subject_key(current.subject) == _normalize_subject_key(subject):
         return False
+    if current.source_name == "sociology-schedule" and _looks_like_sociology_subject_continuation(subject):
+        return True
     if subject[0].islower():
         return True
-    return current.source_name == "sociology-schedule" and _looks_like_sociology_subject_tail(subject)
+    return False
 
 
 def _looks_like_sociology_subject_tail(subject: str) -> bool:
@@ -816,6 +865,36 @@ def _looks_like_sociology_subject_tail(subject: str) -> bool:
             cleaned,
         )
     )
+
+
+def _looks_like_sociology_subject_continuation(subject: str) -> bool:
+    cleaned = normalize_service_tokens(subject)
+    if not cleaned:
+        return False
+    if _looks_like_sociology_subject_tail(cleaned):
+        return True
+    if cleaned.startswith("(") and cleaned.endswith(")") and any(character.islower() for character in cleaned):
+        return True
+    return bool(SOCIOLOGY_TRUNCATED_HOUR_TAIL_RE.fullmatch(cleaned))
+
+
+def _extract_sociology_continuation_payload(subject: str) -> tuple[str, str, str]:
+    cleaned = normalize_service_tokens(subject)
+    if not cleaned:
+        return "", "", ""
+    if SOCIOLOGY_TRUNCATED_HOUR_TAIL_RE.fullmatch(cleaned):
+        lesson_parts: list[str] = []
+        if re.search(r"(?iu)\bл\b", cleaned):
+            lesson_parts.append("лекція")
+        if re.search(r"(?iu)\bпр\b", cleaned):
+            lesson_parts.append("практичне заняття")
+        if re.search(r"(?iu)\b[сc]\b", cleaned):
+            lesson_parts.append("семінар")
+        return "", _merge_unique(lesson_parts), cleaned.strip("() ")
+    payload = _normalize_subject_markers({"subject": cleaned, "lesson_type": "", "notes": ""})
+    if payload["subject"] or payload["lesson_type"] or payload["notes"]:
+        return payload["subject"], payload["lesson_type"], payload["notes"]
+    return cleaned, "", ""
 
 
 def _normalize_subject_key(value: str) -> str:
@@ -890,6 +969,11 @@ def _normalize_program_label(value: str) -> str:
     cleaned = re.sub(r"(?<=[A-Za-z])(?=[А-ЯІЇЄҐа-яіїєґ])", " ", cleaned)
     cleaned = re.sub(r"(?<=[А-ЯІЇЄҐа-яіїєґ])(?=[A-Za-z])", " ", cleaned)
     cleaned = normalize_service_tokens(cleaned).strip(" !.,;:-")
+    course_prefix_match = re.match(r"(?iu)^[1-6]\s+(?P<label>[А-ЯІЇЄҐA-Z][^,;]{3,})$", cleaned)
+    if course_prefix_match:
+        candidate = normalize_service_tokens(course_prefix_match.group("label")).strip(" !.,;:-")
+        if candidate and not looks_like_bad_program_label(candidate):
+            cleaned = candidate
     if cleaned[:1].islower() and any(character.isupper() for character in cleaned[1:]):
         cleaned = cleaned[:1].upper() + cleaned[1:]
     if not cleaned:
@@ -897,6 +981,34 @@ def _normalize_program_label(value: str) -> str:
     if looks_like_bad_program_label(cleaned):
         return ""
     return PROGRAM_LABEL_ALIASES.get(cleaned.casefold(), cleaned)
+
+
+def _source_program_fallback(source_name: str) -> str:
+    return {
+        "geology-schedule": "Геологія",
+        "journ-schedule": "Журналістика",
+        "law-schedule": "Право",
+        "philosophy-schedule": "Філософія",
+        "sociology-schedule": "Соціологія",
+    }.get(source_name, "")
+
+
+def _extract_course_from_program_label(value: str) -> str:
+    cleaned = normalize_service_tokens(value)
+    if not cleaned:
+        return ""
+    match = re.search(
+        r"(?iu)\b(?P<course>\d{1,2})\s*курс\s*[_\"“”']*(?P<level>магістр|бакалавр|маг)?",
+        cleaned,
+    )
+    if not match:
+        return ""
+    level = normalize_service_tokens(match.group("level") or "").casefold()
+    if level.startswith(("маг", "магістр")):
+        return f"{match.group('course')} магістр"
+    if level.startswith("бакалавр"):
+        return f"{match.group('course')} бакалавр"
+    return match.group("course")
 
 
 def _looks_like_program_continuation(value: str) -> bool:
@@ -986,10 +1098,18 @@ def _cleanup_structured_fields(values: dict[str, str]) -> dict[str, str]:
     subject_text, subject_teachers, subject_rooms, subject_links, subject_notes = _cleanup_subject(values["subject"])
     teacher_text, teacher_rooms, teacher_links, teacher_notes = _cleanup_aux_field(values["teacher"], keep="teacher")
     room_text, room_teachers, room_links, room_notes = _cleanup_aux_field(values["room"], keep="room")
+    lesson_type_text, lesson_type_notes, lesson_type_groups = _cleanup_lesson_type_field(values["lesson_type"])
+    group_text = _merge_unique(
+        [
+            _cleanup_groups_field(values["groups"]),
+            *(_cleanup_groups_field(value) for value in lesson_type_groups),
+        ]
+    )
     link_text = _merge_unique([values["link"], *subject_links, *teacher_links, *room_links, *_extract_links(values["notes"])], separator=" ")
     notes_text = _merge_unique(
         [
             *_split_free_notes(values["notes"]),
+            *lesson_type_notes,
             *subject_notes,
             *teacher_notes,
             *room_notes,
@@ -1001,11 +1121,11 @@ def _cleanup_structured_fields(values: dict[str, str]) -> dict[str, str]:
         "day": values["day"],
         "subject": subject_text,
         "teacher": _merge_unique([teacher_text, *subject_teachers, *room_teachers]),
-        "lesson_type": _normalize_lesson_type_field(values["lesson_type"]),
+        "lesson_type": lesson_type_text,
         "link": link_text,
         "room": _merge_unique([room_text, *subject_rooms, *teacher_rooms]),
-        "groups": _cleanup_groups_field(values["groups"]),
-        "course": normalize_service_tokens(values["course"]),
+        "groups": group_text,
+        "course": clean_numeric_artifact(normalize_service_tokens(values["course"])),
         "notes": notes_text,
     }
     return _postprocess_structured_fields(cleaned)
@@ -1208,19 +1328,19 @@ def _cleanup_groups_field(text: str) -> str:
 
 
 def _extract_group_signal_segment(value: str) -> str:
-    cleaned = normalize_service_tokens(value).strip("[]{} ")
+    cleaned = clean_numeric_artifact(normalize_service_tokens(value).strip("[]{} "))
     if not cleaned:
         return ""
     for pattern in GROUP_SIGNAL_PATTERNS:
         match = pattern.fullmatch(cleaned)
         if not match:
             continue
-        candidate = normalize_service_tokens(match.group("value")).strip("[]{} ")
+        candidate = clean_numeric_artifact(normalize_service_tokens(match.group("value")).strip("[]{} "))
         if candidate and not _looks_like_group_noise_segment(candidate):
             return candidate
     quoted_match = GROUP_QUOTED_VALUE_RE.search(cleaned)
     if quoted_match:
-        candidate = normalize_service_tokens(quoted_match.group("value"))
+        candidate = clean_numeric_artifact(normalize_service_tokens(quoted_match.group("value")))
         if candidate and not _looks_like_group_noise_segment(candidate):
             return candidate
     if GROUP_STUDENT_COUNT_RE.fullmatch(cleaned):
@@ -1299,7 +1419,9 @@ def _postprocess_structured_fields(cleaned_fields: dict[str, str]) -> dict[str, 
             updated["room"] = _merge_unique([updated["room"], room_fragment])
         if lesson_fragment and not updated["lesson_type"]:
             updated["lesson_type"] = lesson_fragment
-    updated["room"], room_notes = _cleanup_room_field(updated["room"])
+    updated["room"], room_teachers, room_notes = _cleanup_room_field(updated["room"])
+    if room_teachers:
+        updated["teacher"] = _merge_unique([updated["teacher"], *room_teachers])
     if room_notes:
         updated["notes"] = _merge_unique([updated["notes"], *room_notes])
     updated["teacher"] = _normalize_teacher_field(updated["teacher"])
@@ -1419,17 +1541,58 @@ def _normalize_lesson_type_field(text: str) -> str:
         return ""
     normalized_parts: list[str] = []
     for segment in _split_segments(cleaned):
+        canonical = _normalize_lesson_type_candidate(segment)
+        if canonical:
+            normalized_parts.append(canonical)
+    return _merge_unique(normalized_parts)
+
+
+def _cleanup_lesson_type_field(text: str) -> tuple[str, list[str], list[str]]:
+    cleaned = normalize_service_tokens(text)
+    if not cleaned:
+        return "", [], []
+    lesson_parts: list[str] = []
+    note_parts: list[str] = []
+    group_parts: list[str] = []
+    for segment in _split_segments(cleaned):
         candidate = normalize_service_tokens(segment).strip(" .,:;")
         if not candidate:
             continue
-        canonical = LESSON_TYPE_MARKER_VALUES.get(candidate.casefold(), "")
-        if not canonical:
-            for pattern, mapped in LESSON_TYPE_PATTERNS:
-                if pattern.search(candidate):
-                    canonical = mapped
-                    break
-        normalized_parts.append(canonical or candidate)
-    return _merge_unique(normalized_parts)
+        canonical = _normalize_lesson_type_candidate(candidate)
+        if canonical:
+            lesson_parts.append(canonical)
+            continue
+        if _looks_like_lesson_type_group_payload(candidate):
+            group_parts.append(candidate)
+            continue
+        if len(candidate) == 1:
+            continue
+        note_parts.append(candidate)
+    return _merge_unique(lesson_parts), _unique_list(note_parts), _unique_list(group_parts)
+
+
+def _normalize_lesson_type_candidate(value: str) -> str:
+    candidate = normalize_service_tokens(value).strip(" ().,:;")
+    if not candidate:
+        return ""
+    canonical = LESSON_TYPE_MARKER_VALUES.get(candidate.casefold(), "")
+    if canonical:
+        return canonical
+    for pattern, mapped in LESSON_TYPE_PATTERNS:
+        if pattern.fullmatch(candidate) or pattern.search(candidate):
+            return mapped
+    return ""
+
+
+def _looks_like_lesson_type_group_payload(value: str) -> bool:
+    cleaned = normalize_service_tokens(value)
+    if not cleaned:
+        return False
+    if re.fullmatch(r"(?iu)\d+\s*(?:підгрупа|підгр\.?|група|гр\.?)", cleaned):
+        return True
+    if re.fullmatch(r"(?iu)(?:[ivxlcdmі]+|\d+)\s+група", cleaned):
+        return True
+    return False
 
 
 def _repair_split_teacher_prefix(subject: str, teacher: str) -> tuple[str, str]:
@@ -1516,6 +1679,7 @@ def _looks_like_room_segment(value: str) -> bool:
 
 def _normalize_room_segment(value: str) -> str:
     cleaned = normalize_service_tokens(value)
+    cleaned = re.sub(r"(?<=\d)\.0\b", "", cleaned)
     if cleaned.casefold() in {"online", "онлайн"}:
         return cleaned
     trailing_aud_match = re.fullmatch(r"(?iu)(\d{1,4}[A-Za-zА-ЯІЇЄҐ]?)\s*ауд\.?", cleaned)
@@ -1657,6 +1821,7 @@ def _peel_subject_schedule_prefixes(subject: str) -> tuple[str, list[str]]:
     while True:
         match = (
             LEADING_TIME_NOTICE_SUBJECT_RE.fullmatch(updated)
+            or LEADING_CLOCK_TIME_SUBJECT_RE.fullmatch(updated)
             or LEADING_DATETIME_SUBJECT_RE.fullmatch(updated)
             or LEADING_DATED_SUBJECT_RE.fullmatch(updated)
             or LEADING_DATE_LIST_SUBJECT_RE.fullmatch(updated)
@@ -1703,29 +1868,40 @@ def _peel_trailing_teacher_from_subject(subject: str) -> tuple[str, str]:
     return subject_part, teacher_part
 
 
-def _cleanup_room_field(text: str) -> tuple[str, list[str]]:
+def _cleanup_room_field(text: str) -> tuple[str, list[str], list[str]]:
     cleaned = normalize_service_tokens(text)
     if not cleaned:
-        return "", []
+        return "", [], []
     room_parts: list[str] = []
+    teacher_parts: list[str] = []
     note_parts: list[str] = []
     for segment in _split_segments(cleaned):
         normalized = normalize_service_tokens(segment)
         if not normalized:
+            continue
+        room_teacher_match = SOCIOLOGY_ROOM_TEACHER_RE.fullmatch(normalized)
+        if room_teacher_match:
+            teacher_parts.append(normalize_service_tokens(room_teacher_match.group("teacher")))
+            room_parts.append(_normalize_room_segment(room_teacher_match.group("room")))
             continue
         if _looks_like_room_segment(normalized) or looks_like_roomish_subject_text(normalized) or looks_like_room_text(normalized):
             room_parts.append(_normalize_roomish_segment(normalized))
             continue
         residual, teachers, rooms, links = _extract_entities(normalized)
         room_parts.extend(rooms)
-        note_parts.extend(teachers)
+        teacher_parts.extend(teachers)
         note_parts.extend(links)
         if residual:
+            room_teacher_match = SOCIOLOGY_ROOM_TEACHER_RE.fullmatch(residual)
+            if room_teacher_match:
+                teacher_parts.append(normalize_service_tokens(room_teacher_match.group("teacher")))
+                room_parts.append(_normalize_room_segment(room_teacher_match.group("room")))
+                continue
             if _looks_like_room_segment(residual) or looks_like_roomish_subject_text(residual) or looks_like_room_text(residual):
                 room_parts.append(_normalize_roomish_segment(residual))
             else:
                 note_parts.append(residual)
-    return _merge_unique(room_parts), _unique_list(note_parts)
+    return _merge_unique(room_parts), _unique_list(teacher_parts), _unique_list(note_parts)
 
 
 def _looks_like_subject_noise_segment(value: str) -> bool:

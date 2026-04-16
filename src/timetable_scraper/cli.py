@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 import sys
 
 from .config import load_config, select_sources
 from .doctor import run_doctor
+from .manual_reference import audit_manual_reference_zip_json
 from .models import PipelineOutput
 from .pipeline import inspect_config_source, run_pipeline, run_pipeline_batched
 
@@ -41,6 +43,15 @@ def build_parser() -> argparse.ArgumentParser:
     inspect_parser = subparsers.add_parser("inspect-source", help="Inspect discovered assets.")
     inspect_parser.add_argument("--config", required=True, help="Path to the YAML config.")
     inspect_parser.add_argument("--source", required=False, help="Optional source name filter.")
+
+    audit_reference_parser = subparsers.add_parser("audit-reference", help="Summarize manually filled reference XLSX files from a ZIP archive.")
+    audit_reference_parser.add_argument("--zip", required=True, help="Path to the manual reference ZIP archive.")
+    audit_reference_parser.add_argument(
+        "--max-rows-per-sheet",
+        type=int,
+        default=200,
+        help="Maximum data rows sampled from each sheet.",
+    )
     return parser
 
 
@@ -56,6 +67,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "inspect-source":
         config = load_config(args.config)
         print(inspect_config_source(config, source_name=args.source))
+        return 0
+    if args.command == "audit-reference":
+        print(audit_manual_reference_zip_json(Path(args.zip), max_rows_per_sheet=args.max_rows_per_sheet))
         return 0
     if args.command in {"run", "run-batched"}:
         config = select_sources(load_config(args.config), getattr(args, "sources", None))

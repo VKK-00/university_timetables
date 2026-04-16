@@ -4,6 +4,7 @@ from collections import Counter, defaultdict
 from copy import copy
 from dataclasses import dataclass
 from pathlib import Path
+import re
 from typing import Iterable
 
 from openpyxl import Workbook, load_workbook
@@ -15,7 +16,9 @@ from .utils import (
     ensure_parent,
     infer_asset_label_from_locator,
     json_dumps,
+    looks_like_bad_program_label,
     normalize_program_candidate,
+    normalize_service_tokens,
     slugify_filename,
     truncate_sheet_title,
 )
@@ -393,16 +396,59 @@ def _export_faculty_label(row: NormalizedRow) -> str:
 def _export_program_label(row: NormalizedRow) -> str:
     label = coalesce_program_label(
         row.program,
-        row.groups,
         infer_asset_label_from_locator(row.asset_locator),
-        row.sheet_name,
         fallback="unknown program",
     ) or "unknown program"
     return normalize_program_candidate(label) or label
 
 
 def _export_sheet_label(row: NormalizedRow) -> str:
-    return coalesce_label(row.sheet_name, row.course, row.program, row.source_name, fallback="Аркуш1")
+    course_label = _export_course_sheet_label(row.course) or _export_course_sheet_label(row.sheet_name)
+    if course_label:
+        return course_label
+    for candidate in (row.sheet_name, row.program, row.source_name):
+        label = normalize_service_tokens(candidate)
+        if not label or looks_like_bad_program_label(label):
+            continue
+        return label
+    return "Аркуш1"
+
+
+def _export_course_sheet_label(value: str) -> str:
+    cleaned = normalize_service_tokens(value)
+    if not cleaned:
+        return ""
+    cleaned = re.sub(r"(?<=\d)\.0\b", "", cleaned)
+    if re.search(r"[;,/]", cleaned):
+        return ""
+    match = re.fullmatch(
+        r"(?iu)(?P<course>\d{1,2})(?:\s*курс)?(?:\s*(?P<level>бакалавр\w*|магістр\w*|маг\w*))?\s*",
+        cleaned,
+    )
+    if match:
+        level = _normalize_sheet_level(match.group("level") or "")
+        return f"{match.group('course')} курс{level}"
+    match = re.match(r"(?iu)^\s*(?P<course>\d{1,2})\s*[кk](?:\b|\s)", cleaned)
+    if match:
+        return f"{match.group('course')} курс"
+    match = re.search(r"(?iu)\b(?P<course>\d{1,2})\s*курс(?:\s*(?P<level>бакалавр\w*|магістр\w*|маг\w*))?", cleaned)
+    if match:
+        level = _normalize_sheet_level(match.group("level") or "")
+        return f"{match.group('course')} курс{level}"
+    if cleaned.casefold() in {"всі", "усі"}:
+        return "Всі курси"
+    return ""
+
+
+def _normalize_sheet_level(value: str) -> str:
+    cleaned = normalize_service_tokens(value).casefold()
+    if not cleaned:
+        return ""
+    if cleaned.startswith(("маг", "магістр")):
+        return " магістр"
+    if cleaned.startswith("бакалавр"):
+        return " бакалавр"
+    return ""
 
 
 def _sort_key(row: NormalizedRow) -> tuple[int, str, str, str]:
