@@ -27,40 +27,38 @@
 
 ## Current KNU Coverage / Поточне покриття КНУ
 
-Latest full KNU web run source of truth: April 16, 2026
+Latest full KNU web run source of truth: April 16, 2026. The current baseline was refreshed with `run-batched --merge-existing` for `chem-schedule`, `biomed-schedule`, and `fit-schedule`, so the changed sources are current without rerunning every network source.
 
-- `78` exported workbooks
-- `37741` accepted rows
-- `9019` review rows
-- `46667` rows with autofixes
+- `80` exported workbooks
+- `38470` accepted rows
+- `8358` review rows
+- `46735` rows with autofixes
 - `0` QA warnings
 - `0` QA failures
 
 Current source statuses:
 
-- `parsed`: `Econom`, `History`, `FIT`, `Psychology`, `REX`, `Sociology`, `Physics`, `Philosophy`, `Law`, `Journalism`, `Geology`, `Biomed`
+- `parsed`: `Econom`, `History`, `FIT`, `Psychology`, `REX`, `Sociology`, `Physics`, `Philosophy`, `Chemistry`, `Law`, `Journalism`, `Geology`, `Biomed`
 - `confirmed-blocker`: `Mechmat`, `CSC`, `Military`, `IHT`, `IIR`, `Philology`
-- `review-only`: `Geo`, `Chemistry`
+- `review-only`: `Geo`
 
 Largest parsed sources in the current run:
 
-- `FIT: 29936 accepted, 700 review`
+- `FIT: 30128 accepted, 576 review`
 - `Sociology: 2955 accepted, 285 review`
 - `Econom: 980 accepted, 388 review`
 - `Physics: 829 accepted, 5027 review`
 - `Law: 776 accepted, 206 review`
 
-Current tiny workbook count in `out_knu_web/qa_report.json`: `4`
+Current tiny workbook count in `out_knu_web/qa_report.json`: `5`
 
-Latest focused refresh for changed sources, written to ignored `out_knu_web_focus/` on April 16, 2026:
+Latest source refresh included in the full `out_knu_web/` baseline:
 
 - `chem-schedule: 443 accepted, 40 review`, workbook QA issues `0`
 - `fit-schedule: 30128 accepted, 576 review`, workbook QA issues `0`
 - `biomed-schedule: 618 accepted, 503 review`, workbook QA issues `0`
-- focused output bad filenames: `0`
-- focused output forbidden accepted subjects: `0`
-
-The full `out_knu_web/` baseline was not overwritten by this focused refresh. A full `run-batched` attempt after these changes hit the local command timeout before final export, so the full baseline above remains the last completed full run.
+- bad filenames from known technical patterns: `0`
+- forbidden accepted subjects from the short-token set: `0`
 
 Detailed coverage and source-level status are documented in:
 
@@ -117,6 +115,14 @@ Run the same config in segmented batches to avoid long single-pass runs:
 ```powershell
 python -m timetable_scraper run-batched --config config/knu_web_schedule.yaml --batch-size 5
 ```
+
+Refresh selected sources inside an existing full output directory without rerunning every source:
+
+```powershell
+python -m timetable_scraper run-batched --config config/knu_web_schedule.yaml --sources chem-schedule biomed-schedule fit-schedule --batch-size 3 --merge-existing
+```
+
+`--merge-existing` requires an existing `manifest.jsonl` and `source_summary.json` in the configured output directory. It drops old rows for the selected `--sources`, keeps rows and metadata for unselected sources, then rewrites the normal output artifacts.
 
 Run the focused smoke set for the most failure-prone KNU sources:
 
@@ -312,6 +318,7 @@ python -m timetable_scraper audit-reference --zip drive-download-20260416T062121
 python -m timetable_scraper run --config config/sources.yaml
 python -m timetable_scraper run --config config/knu_web_schedule.yaml
 python -m timetable_scraper run-batched --config config/knu_web_schedule.yaml --batch-size 5
+python -m timetable_scraper run-batched --config config/knu_web_schedule.yaml --sources chem-schedule biomed-schedule fit-schedule --batch-size 3 --merge-existing
 python -m timetable_scraper run-batched --config config/knu_web_smoke.yaml --batch-size 3
 ```
 

@@ -33,10 +33,12 @@
 ### Оркестрация
 
 - [C:/Coding projects/university_timetables/src/timetable_scraper/cli.py](C:/Coding%20projects/university_timetables/src/timetable_scraper/cli.py)
-  - CLI-входы `doctor`, `inspect-source`, `audit-reference`, `run`, `run-batched`.
+  - CLI-входы `doctor`, `inspect-source`, `audit-reference`, `run`, `run-batched`;
+  - флаг `run-batched --merge-existing` для точечного обновления выбранных источников внутри уже существующего полного output.
 - [C:/Coding projects/university_timetables/src/timetable_scraper/pipeline.py](C:/Coding%20projects/university_timetables/src/timetable_scraper/pipeline.py)
   - orchestration полного запуска;
-  - segmented `run-batched`, чтобы не упираться в длинный single-pass run.
+  - segmented `run-batched`, чтобы не упираться в длинный single-pass run;
+  - merge-existing режим, который читает старый `manifest.jsonl`, выбрасывает строки только выбранных `--sources`, добавляет пересобранные строки и сохраняет source metadata для невыбранных источников.
 
 ### Конфиг и модели
 
@@ -199,6 +201,7 @@ python -m timetable_scraper inspect-source --config config/knu_web_schedule.yaml
 python -m timetable_scraper audit-reference --zip drive-download-20260416T062121Z-3-001.zip
 python -m timetable_scraper run --config config/knu_web_schedule.yaml
 python -m timetable_scraper run-batched --config config/knu_web_schedule.yaml --batch-size 5
+python -m timetable_scraper run-batched --config config/knu_web_schedule.yaml --sources chem-schedule biomed-schedule fit-schedule --batch-size 3 --merge-existing
 python -m timetable_scraper run-batched --config config/knu_web_smoke.yaml --batch-size 3
 python -m ruff check src tests
 python -m mypy src
@@ -239,6 +242,9 @@ python -m build
 8. **Одна программа — одна книга, курсы — листы.**
    Это ближе к ручному эталону: строка 1 содержит ОП/специальность, строка 2 содержит 12 колонок шаблона, строки 3+ содержат пары, а разные курсы одной программы живут на отдельных листах одной книги.
 
+9. **Точечное обновление baseline делается через `--merge-existing`, а не через ручное копирование артефактов.**
+   Этот режим сохраняет полный `out_knu_web`, но заменяет строки только выбранных источников. Он нужен, потому что полный сетевой KNU run может не уложиться в лимит среды, а принимать решения по устаревшему baseline нельзя.
+
 ## Какие варианты рассматривались и почему выбрано текущее решение
 
 - **Полностью ослабить QA**, чтобы увеличить `accepted`.
@@ -248,7 +254,7 @@ python -m build
   Не выбрано как дефолт, потому что это легко смешивает разные программы в одну книгу.
 
 - **Один большой full run вместо batch orchestration.**
-  Не выбрано, потому что есть реальный риск длинных сетевых таймаутов и нестабильности среды.
+  Не выбрано, потому что есть реальный риск длинных сетевых таймаутов и нестабильности среды. Вместо этого используется `run-batched`, а для обновления отдельных источников в полном baseline используется `run-batched --merge-existing`.
 
 - **Чинить всё только regex-ами в одном месте.**
   Не выбрано, потому что часть проблем относится к parser stage, часть к normalization, часть к QA demotion logic.
@@ -263,15 +269,17 @@ python -m build
 
 ## Актуальное состояние на 2026-04-16
 
-Последний подтверждённый полный запуск:
+Последний подтверждённый baseline в [C:/Coding projects/university_timetables/out_knu_web](C:/Coding%20projects/university_timetables/out_knu_web):
 
-- команда: `python -m timetable_scraper run-batched --config config/knu_web_schedule.yaml --batch-size 5`
+- базовая команда полного запуска: `python -m timetable_scraper run-batched --config config/knu_web_schedule.yaml --batch-size 5`;
+- последнее точечное обновление: `python -m timetable_scraper run-batched --config config/knu_web_schedule.yaml --sources chem-schedule biomed-schedule fit-schedule --batch-size 3 --merge-existing`;
+- смысл последней команды: старые строки `chem-schedule`, `biomed-schedule`, `fit-schedule` были удалены из существующего manifest, эти источники пересобраны заново, остальные источники и их source metadata сохранены.
 - результат:
-  - `78` exported workbooks
-  - `37741` accepted rows
-  - `9019` review rows
-  - `46667` rows with autofixes
-  - `0` workbook QA issues
+  - `80` exported workbooks
+  - `38470` accepted rows
+  - `8358` review rows
+  - `46735` rows with autofixes
+  - `0` QA warnings
   - `0` QA failures
 
 Последние важные правки:
@@ -302,45 +310,45 @@ python -m build
 - в [C:/Coding projects/university_timetables/src/timetable_scraper/normalize.py](C:/Coding%20projects/university_timetables/src/timetable_scraper/normalize.py) добавлен консервативный fallback `chem-schedule -> Хімія`, потому что текущий химфак source даёт один официальный файл с техническими sheet/program заголовками `РОЗКЛАД з ...`;
 - в [C:/Coding projects/university_timetables/src/timetable_scraper/utils.py](C:/Coding%20projects/university_timetables/src/timetable_scraper/utils.py) `normalize_program_candidate` теперь извлекает program из длинных biomed-заголовков вида `Освітня програма "Біологія" ОС "Магістр"`;
 - в [C:/Coding projects/university_timetables/src/timetable_scraper/qa.py](C:/Coding%20projects/university_timetables/src/timetable_scraper/qa.py) для `fit-schedule` добавлено узкое исключение: `Іноземна мова` может иметь длинный semicolon-separated список преподавателей, если в списке нет ссылок, аудиторий, времени или lesson markers; строки без предмета это не поднимает в `accepted`.
+- в [C:/Coding projects/university_timetables/src/timetable_scraper/pipeline.py](C:/Coding%20projects/university_timetables/src/timetable_scraper/pipeline.py) добавлен режим `merge_existing` для `run_pipeline_batched`: он читает старый `manifest.jsonl`, сохраняет невыбранные источники, пересобирает только выбранные `--sources`, а metadata источников без строк берёт из старого `source_summary.json`;
+- в [C:/Coding projects/university_timetables/src/timetable_scraper/cli.py](C:/Coding%20projects/university_timetables/src/timetable_scraper/cli.py) добавлен CLI-флаг `run-batched --merge-existing`; он требует `--sources`, чтобы случайно не запустить бессмысленный merge без выбранных источников;
+- в [C:/Coding projects/university_timetables/tests/test_pipeline_e2e.py](C:/Coding%20projects/university_timetables/tests/test_pipeline_e2e.py) добавлена регрессия, которая проверяет сохранение старых manifest-строк и source metadata для невыбранных источников.
 
-Актуальный полный baseline после `python -m timetable_scraper run-batched --config config/knu_web_schedule.yaml --batch-size 5`:
+Статусы источников в текущем baseline:
 
-- exported workbooks: `78`
-- accepted rows: `37741`
-- review rows: `9019`
-- rows with autofixes: `46667`
-- QA warnings: `0`
-- QA failures: `0`
+- `parsed`: `econom-schedule`, `history-schedule`, `fit-schedule`, `psy-schedule`, `rex-schedule`, `sociology-schedule`, `phys-schedule`, `philosophy-schedule`, `chem-schedule`, `law-schedule`, `journ-schedule`, `geology-schedule`, `biomed-schedule`;
+- `confirmed-blocker`: `mechmat-schedule`, `csc-schedule`, `military-schedule`, `iht-schedule`, `iir-schedule`, `philology-schedule`;
+- `review-only`: `geo-schedule`.
 
-Оставшиеся основные backlog-и после этого состояния:
+Оставшиеся основные backlog-и:
 
 - `phys-schedule`: `5027 review`
 - `geo-schedule`: `718 review`
-- `fit-schedule`: `700 review`
-- `biomed-schedule`: `597 review`
-- `chem-schedule`: `483 review`
+- `fit-schedule`: `576 review`
+- `biomed-schedule`: `503 review`
 - `econom-schedule`: `388 review`
 - `rex-schedule`: `295 review`
 - `sociology-schedule`: `285 review`
 - `law-schedule`: `206 review`
+- `philosophy-schedule`: `105 review`
+- `history-schedule`: `96 review`
+- `chem-schedule` после merge-refresh: `40 review`
 
-Оставшиеся `tiny workbook`-и в полном baseline сейчас выглядят как спорные, но не явно ложные. Текущее количество: `4`.
+Оставшиеся `tiny workbook`-и в полном baseline сейчас выглядят как спорные, но не явно ложные. Текущее количество: `5`.
 
+- `Фінанси публічного сектору.xlsx`
+- `Лабораторна діагностика.xlsx`
 - `Психологія.xlsx`
 - `Фізика ядра та елементарних частинок.xlsx`
 - `Архівістика та управл. док.xlsx`
-- `Фінанси публічного сектору.xlsx`
 
-Отдельный focused baseline после последних source-specific правок был записан в ignored-директорию [C:/Coding projects/university_timetables/out_knu_web_focus](C:/Coding%20projects/university_timetables/out_knu_web_focus). Он не заменяет полный [C:/Coding projects/university_timetables/out_knu_web](C:/Coding%20projects/university_timetables/out_knu_web), но подтверждает дельту по изменённым источникам:
+Проверки после merge-refresh:
 
-- `chem-schedule`: `443 accepted`, `40 review`, статус `parsed`;
-- `fit-schedule`: `30128 accepted`, `576 review`;
-- `biomed-schedule`: `618 accepted`, `503 review`;
-- workbook QA issues: `0`;
-- bad user-facing filenames: `0`;
-- forbidden accepted subjects: `0`.
-
-Попытка полного `python -m timetable_scraper run-batched --config config/knu_web_schedule.yaml --batch-size 5` после этих правок была остановлена локальным timeout через 60 минут до финального export. Поэтому полный baseline выше остаётся последним завершённым полным baseline; для следующего этапа нужен resumable/merge режим, который сможет заменять только пересобранные source-группы в общем output без повторного ожидания всех источников.
+- `out_knu_web/qa_report.json`: `80` workbooks, `0` warnings, `0` failures;
+- bad user-facing filenames по известным техническим шаблонам: `0`;
+- forbidden accepted subjects из short-token/session-only набора: `0`;
+- `tiny_count` снизился относительно старого `19` до `5`;
+- `chem-schedule` больше не `review-only`, а `parsed`.
 
 ## Что нужно обновлять в этом файле при изменениях
 

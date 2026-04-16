@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
+import json
 from pathlib import Path
+from typing import Any
 
 import requests  # type: ignore[import-untyped]
 
@@ -10,7 +12,16 @@ from .adapters import parse_asset
 from .discovery import discover_source, discover_sources
 from .export import export_rows, write_autofix_report
 from .fetch import build_http_session, fetch_asset
-from .models import AppConfig, DiscoveredAsset, DiscoveryIssue, DiscoveryResult, NormalizedRow, PipelineOutput, SourceConfig
+from .models import (
+    AppConfig,
+    DiscoveredAsset,
+    DiscoveryIssue,
+    DiscoveryResult,
+    NormalizedRow,
+    PipelineOutput,
+    SourceConfig,
+    SourceRunSummary,
+)
 from .normalize import normalize_document
 from .qa import audit_exported_workbooks, partition_rows, refine_group_quality, sanitize_export_rows
 from .reporting import (
@@ -46,15 +57,33 @@ def run_pipeline(config: AppConfig) -> PipelineOutput:
     return _finalize_pipeline_run(config, accumulation, previous_summaries=previous_summaries)
 
 
-def run_pipeline_batched(config: AppConfig, *, batch_size: int = 5) -> PipelineOutput:
+def run_pipeline_batched(
+    config: AppConfig,
+    *,
+    batch_size: int = 5,
+    merge_existing: bool = False,
+    summary_sources: list[SourceConfig] | None = None,
+) -> PipelineOutput:
     if batch_size < 1:
         raise ValueError("batch_size must be at least 1")
     previous_summaries = load_previous_source_summaries(config.output_dir)
     accumulation = PipelineAccumulation()
+    refreshed_source_names = {source.name for source in config.sources}
+    preserved_source_names: set[str] = set()
+    if merge_existing:
+        existing_rows = _load_existing_manifest_rows(config.output_dir, exclude_source_names=refreshed_source_names)
+        preserved_source_names = set(previous_summaries) - refreshed_source_names
+        accumulation.normalized_rows.extend(existing_rows)
     with build_http_session() as session:
         for source_batch in _iter_source_batches(config.sources, batch_size=batch_size):
             accumulation.extend(_collect_pipeline_batch(config, source_batch, session=session))
-    return _finalize_pipeline_run(config, accumulation, previous_summaries=previous_summaries)
+    return _finalize_pipeline_run(
+        config,
+        accumulation,
+        previous_summaries=previous_summaries,
+        summary_sources=summary_sources,
+        preserved_source_names=preserved_source_names,
+    )
 
 
 def _collect_pipeline_batch(
@@ -88,6 +117,8 @@ def _finalize_pipeline_run(
     accumulation: PipelineAccumulation,
     *,
     previous_summaries,
+    summary_sources: list[SourceConfig] | None = None,
+    preserved_source_names: set[str] | None = None,
 ) -> PipelineOutput:
     discovery = DiscoveryResult(
         assets=list(accumulation.discovery_assets),
@@ -113,13 +144,15 @@ def _finalize_pipeline_run(
         output_dir=config.output_dir,
     )
     source_summaries = build_source_summaries(
-        config.sources,
+        summary_sources or config.sources,
         discovery,
         accepted,
         review,
         attempted_assets=accumulation.attempted_assets,
         runtime_issues=accumulation.runtime_issues,
     )
+    if preserved_source_names:
+        _apply_previous_source_metadata(source_summaries, previous_summaries, preserved_source_names)
     source_summary_path, source_report_path = write_source_summaries(source_summaries, output_dir=config.output_dir)
     run_delta_path = write_run_delta(source_summaries, previous_summaries, output_dir=config.output_dir)
     return PipelineOutput(
@@ -148,6 +181,70 @@ def _finalize_pipeline_run(
 def _iter_source_batches(sources: list[SourceConfig], *, batch_size: int):
     for index in range(0, len(sources), batch_size):
         yield sources[index : index + batch_size]
+
+
+def _load_existing_manifest_rows(output_dir: Path, *, exclude_source_names: set[str]) -> list[NormalizedRow]:
+    manifest_path = output_dir / "manifest.jsonl"
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"Cannot merge existing output because manifest is missing: {manifest_path}")
+    rows: list[NormalizedRow] = []
+    for line in manifest_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        payload = json.loads(line)
+        if not isinstance(payload, dict):
+            continue
+        source_name = str(payload.get("source_name") or "")
+        if source_name in exclude_source_names:
+            continue
+        rows.append(_normalized_row_from_manifest_payload(payload))
+    return rows
+
+
+def _normalized_row_from_manifest_payload(payload: dict[str, Any]) -> NormalizedRow:
+    fields = NormalizedRow.__dataclass_fields__
+    list_fields = {"warnings", "autofix_actions", "qa_flags"}
+    kwargs: dict[str, Any] = {}
+    for field_name in fields:
+        value = payload.get(field_name)
+        if field_name in list_fields:
+            kwargs[field_name] = [str(item) for item in value] if isinstance(value, list) else []
+        elif field_name == "confidence":
+            kwargs[field_name] = float(value) if isinstance(value, (int, float)) else 1.0
+        elif value is None:
+            continue
+        else:
+            kwargs[field_name] = str(value)
+    return NormalizedRow(**kwargs)
+
+
+def _apply_previous_source_metadata(
+    summaries: list[SourceRunSummary],
+    previous_summaries: dict[str, dict[str, Any]],
+    preserved_source_names: set[str],
+) -> None:
+    for summary in summaries:
+        if summary.source_name not in preserved_source_names:
+            continue
+        previous = previous_summaries.get(summary.source_name)
+        if not previous:
+            continue
+        summary.status = str(previous.get("status") or summary.status)
+        summary.note = str(previous.get("note") or summary.note)
+        summary.discovered_assets = _int_from_previous(previous, "discovered_assets", summary.discovered_assets)
+        summary.attempted_assets = _int_from_previous(previous, "attempted_assets", summary.attempted_assets)
+        summary.discovery_issues = _list_from_previous(previous, "discovery_issues", summary.discovery_issues)
+        summary.runtime_issues = _list_from_previous(previous, "runtime_issues", summary.runtime_issues)
+
+
+def _int_from_previous(payload: dict[str, Any], key: str, fallback: int) -> int:
+    value = payload.get(key)
+    return int(value) if isinstance(value, (int, float)) else fallback
+
+
+def _list_from_previous(payload: dict[str, Any], key: str, fallback: list[str]) -> list[str]:
+    value = payload.get(key)
+    return [str(item) for item in value] if isinstance(value, list) else fallback
 
 
 def _prepare_output_dir(output_dir: Path) -> None:

@@ -36,6 +36,11 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="*",
         help="Optional source names to run. Accepts space-separated or comma-separated names.",
     )
+    batched_parser.add_argument(
+        "--merge-existing",
+        action="store_true",
+        help="Refresh selected sources and merge them into the existing output manifest.",
+    )
 
     doctor_parser = subparsers.add_parser("doctor", help="Check dependencies and OCR stack.")
     doctor_parser.add_argument("--config", required=False, help="Optional config path.")
@@ -72,13 +77,23 @@ def main(argv: list[str] | None = None) -> int:
         print(audit_manual_reference_zip_json(Path(args.zip), max_rows_per_sheet=args.max_rows_per_sheet))
         return 0
     if args.command in {"run", "run-batched"}:
-        config = select_sources(load_config(args.config), getattr(args, "sources", None))
+        full_config = load_config(args.config)
+        requested_sources = getattr(args, "sources", None)
+        merge_existing = bool(getattr(args, "merge_existing", False))
+        if merge_existing and not requested_sources:
+            parser.error("--merge-existing requires --sources so only selected sources are refreshed")
+        config = select_sources(full_config, requested_sources)
         ok, messages = run_doctor(require_tesseract=config.ocr_enabled)
         print("\n".join(messages))
         if not ok:
             return 1
         result = (
-            run_pipeline_batched(config, batch_size=args.batch_size)
+            run_pipeline_batched(
+                config,
+                batch_size=args.batch_size,
+                merge_existing=merge_existing,
+                summary_sources=full_config.sources if merge_existing else None,
+            )
             if args.command == "run-batched"
             else run_pipeline(config)
         )
